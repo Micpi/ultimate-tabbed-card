@@ -1,0 +1,11 @@
+{
+  "name": "ultimate-tabbed-card",
+  "version": "0.1.2",
+  "private": true,
+  "description": "High-performance tabbed card for Home Assistant",
+  "license": "MIT",
+  "scripts": {
+    "build": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.copyFileSync('ultimate-tabbed-card.js','dist/ultimate-tabbed-card.js');console.log('dist/ultimate-tabbed-card.js generated');\"",
+    "watch": "node -e \"console.log('Watch mode: use your editor/terminal watcher tooling for this card.');\""
+  }
+}
