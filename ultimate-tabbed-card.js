@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.11"
+  const VERSION = "0.3.12"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -910,6 +910,7 @@
       this._templateResults = new Map()
       this._templatePending = false
       this._touchStart = null
+      this._activationCheckPending = false
 
       this._onTabClick = this._onTabClick.bind(this)
       this._onTabKeydown = this._onTabKeydown.bind(this)
@@ -923,7 +924,7 @@
       const previousId = this._config?.tabs?.[previousIndex]?.attributes?.id || ""
       this._config = normalizeConfig(config)
       this._renderVersion += 1
-      this._helpersPromise = loadCardHelpersWhenReady()
+      this._helpersPromise = this._loadHelpers()
       this._selectedIndex = this._resolveInitialIndex({
         preserveCurrent: hadConfig,
         previousIndex,
@@ -936,6 +937,7 @@
       this._renderShell()
       this._refreshVisibleTabs()
       this._activateSelectedTab({ force: true, silent: true })
+      this._scheduleActivationCheck()
       if (this._config.options.preload === "all") {
         this._warmupAllTabs()
       } else if (this._config.options.preload === "idle") {
@@ -954,10 +956,11 @@
 
       if (!this._config) return
       const nextSignature = this._buildWatchSignature()
-      if (nextSignature !== this._watchSignature) {
+      if (nextSignature !== this._watchSignature || this._needsActivePane()) {
         this._watchSignature = nextSignature
         this._refreshVisibleTabs()
         this._scheduleTemplateEvaluation()
+        this._scheduleActivationCheck()
       }
     }
 
@@ -988,10 +991,20 @@
       if (!this.shadowRoot.innerHTML) this._renderShell()
       this._refreshVisibleTabs()
       this._activateSelectedTab({ force: true, silent: true })
+      this._scheduleActivationCheck()
     }
 
     disconnectedCallback() {
       this._touchStart = null
+    }
+
+    _loadHelpers() {
+      const current = this._helpersPromise || loadCardHelpersWhenReady()
+      this._helpersPromise = current.catch(() => {
+        this._helpersPromise = loadCardHelpersWhenReady()
+        return this._helpersPromise
+      })
+      return this._helpersPromise
     }
 
     _resolveInitialIndex(options = {}) {
@@ -1355,7 +1368,6 @@
           .pane {
             display: none;
             min-width: 0;
-            contain: layout style;
           }
 
           .pane.active {
@@ -1537,6 +1549,38 @@
     _needsActivePane() {
       const entry = this._cardCache.get(this._selectedIndex)
       return this._activeCardIndex !== this._selectedIndex || !entry?.pane?.isConnected
+    }
+
+    _scheduleActivationCheck() {
+      if (this._activationCheckPending) return
+      this._activationCheckPending = true
+      const verify = () => {
+        this._activationCheckPending = false
+        if (!this.isConnected || !this._config || !this.shadowRoot) return
+        if (this._visibleIndices.length && this._needsActivePane()) {
+          this._activateSelectedTab({ force: true, silent: true })
+        }
+        this._refreshActivePaneHass()
+      }
+      if (typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(verify))
+      } else {
+        window.setTimeout(verify, 80)
+      }
+      window.setTimeout(verify, 450)
+    }
+
+    _refreshActivePaneHass() {
+      const entry = this._cardCache.get(this._selectedIndex)
+      if (!entry || !this._hass) return
+      this._syncHassToEntry(entry)
+    }
+
+    _syncHassToEntry(entry) {
+      if (!entry?.cards || !this._hass) return
+      entry.cards.forEach((card) => {
+        if (card) card.hass = this._hass
+      })
     }
 
     _resolveSelectableIndex(preferredIndex = this._selectedIndex) {
@@ -1730,6 +1774,7 @@
         }
         if (!this._cardCache.has(clamped)) {
           this._cardCache.set(clamped, entry)
+          entry.pane?.classList.add("active")
           panel.appendChild(entry.pane)
         } else {
           entry = this._cardCache.get(clamped)
@@ -1737,12 +1782,17 @@
       }
 
       if (activationToken !== this._activationToken && clamped !== this._selectedIndex) return
-      if (entry?.pane && !entry.pane.isConnected) panel.appendChild(entry.pane)
+      if (entry?.pane && !entry.pane.isConnected) {
+        entry.pane.classList.add("active")
+        panel.appendChild(entry.pane)
+      }
       entry.lastUsed = Date.now()
+      this._syncHassToEntry(entry)
       this._syncPaneVisibility(clamped)
       this._activeCardIndex = clamped
       this._touchCacheOrder(clamped)
       this._enforceCacheLimit()
+      this._scheduleActivationCheck()
     }
 
     _syncPaneVisibility(activeIndex = this._selectedIndex) {
@@ -1765,7 +1815,7 @@
     async _createCardPane(index) {
       const tab = this._config.tabs[index]
       const pane = document.createElement("div")
-      pane.className = "pane"
+      pane.className = "pane" + (index === this._selectedIndex ? " active" : "")
       pane.dataset.index = String(index)
       pane.id = "utc-panel-" + this._instanceId + "-" + index
       pane.setAttribute("role", "tabpanel")
@@ -1792,7 +1842,7 @@
       for (let cardIndex = 0; cardIndex < tab.cards.length; cardIndex += 1) {
         const cardConfig = tab.cards[cardIndex]
         try {
-          const helpers = await this._helpersPromise
+          const helpers = await this._loadHelpers()
           const card = await helpers.createCardElement(cardConfig)
           card.hass = this._hass
           card.addEventListener(
