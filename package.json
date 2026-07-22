@@ -1,6 +1,6 @@
 {
   "name": "ultimate-tabbed-card",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "private": true,
   "description": "High-performance visual tabbed card for Home Assistant",
   "license": "MIT",

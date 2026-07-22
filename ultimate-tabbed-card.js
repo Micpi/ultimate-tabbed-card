@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.7"
+  const VERSION = "0.3.8"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -761,6 +761,7 @@
       this._helpersPromise = null
       this._selectedIndex = 0
       this._activeCardIndex = -1
+      this._activationToken = 0
       this._cardCache = new Map()
       this._cardCreation = new Map()
       this._cacheOrder = []
@@ -840,11 +841,10 @@
     }
 
     connectedCallback() {
-      if (this._config && !this.shadowRoot.innerHTML) {
-        this._renderShell()
-        this._refreshVisibleTabs()
-        this._activateTab(this._selectedIndex, { force: true, silent: true })
-      }
+      if (!this._config) return
+      if (!this.shadowRoot.innerHTML) this._renderShell()
+      this._refreshVisibleTabs()
+      this._activateTab(this._selectedIndex, { force: true, silent: true })
     }
 
     disconnectedCallback() {
@@ -1434,9 +1434,11 @@
       const tab = this._config.tabs[clamped]
       if (!tab || tab.attributes.disabled || !this._isTabVisible(tab)) return
       if (!options.force && clamped === this._selectedIndex && this._activeCardIndex === clamped) {
+        this._syncPaneVisibility(clamped)
         return
       }
 
+      const activationToken = ++this._activationToken
       this._selectedIndex = clamped
       this._rememberIndex(clamped)
       this._updateHash(clamped)
@@ -1451,9 +1453,7 @@
         this._deleteCachedTab(this._activeCardIndex)
       }
 
-      this._cardCache.forEach((entry, entryIndex) => {
-        entry.pane.classList.toggle("active", entryIndex === clamped)
-      })
+      this._syncPaneVisibility(clamped)
 
       let entry = this._cardCache.get(clamped)
       if (!entry) {
@@ -1465,7 +1465,7 @@
           this._cardCreation.set(clamped, creation)
         }
         entry = await creation
-        if (renderVersion !== this._renderVersion) return
+        if (renderVersion !== this._renderVersion || activationToken !== this._activationToken) return
         if (!this._cardCache.has(clamped)) {
           this._cardCache.set(clamped, entry)
           panel.appendChild(entry.pane)
@@ -1474,11 +1474,19 @@
         }
       }
 
+      if (activationToken !== this._activationToken) return
+      if (entry?.pane && !entry.pane.isConnected) panel.appendChild(entry.pane)
       entry.lastUsed = Date.now()
-      entry.pane.classList.add("active")
+      this._syncPaneVisibility(clamped)
       this._activeCardIndex = clamped
       this._touchCacheOrder(clamped)
       this._enforceCacheLimit()
+    }
+
+    _syncPaneVisibility(activeIndex = this._selectedIndex) {
+      this._cardCache.forEach((entry, entryIndex) => {
+        entry?.pane?.classList.toggle("active", entryIndex === activeIndex)
+      })
     }
 
     async _createCardPane(index) {
@@ -1546,8 +1554,8 @@
       if (!current?.pane) return
       const replacement = await this._createCardPane(index)
       current.pane.replaceWith(replacement.pane)
-      replacement.pane.classList.toggle("active", index === this._selectedIndex)
       this._cardCache.set(index, replacement)
+      this._syncPaneVisibility(this._selectedIndex)
     }
 
     _touchCacheOrder(index) {
@@ -1586,6 +1594,7 @@
             entry.pane.classList.toggle("active", index === this._selectedIndex)
             this._cardCache.set(index, entry)
             this.shadowRoot.querySelector(".panel")?.appendChild(entry.pane)
+            this._syncPaneVisibility(this._selectedIndex)
             this._touchCacheOrder(index)
           }
         }
@@ -1613,6 +1622,7 @@
             if (renderVersion !== this._renderVersion || this._cardCache.has(index)) continue
             this._cardCache.set(index, entry)
             this.shadowRoot.querySelector(".panel")?.appendChild(entry.pane)
+            this._syncPaneVisibility(this._selectedIndex)
             this._touchCacheOrder(index)
           }
         }
