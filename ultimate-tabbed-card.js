@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.1"
+  const VERSION = "0.3.2"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -71,6 +71,7 @@
     gauge: { type: "gauge", entity: "sensor.home_temperature", min: 0, max: 40 },
     glance: { type: "glance", entities: ["sun.sun"] },
     history: { type: "history-graph", entities: ["sun.sun"] },
+    "history-graph": { type: "history-graph", entities: ["sun.sun"] },
   }
 
   const STYLE_PRESETS = {
@@ -174,26 +175,6 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;")
-  }
-
-  function safeColor(value, fallback) {
-    if (typeof value !== "string") return fallback
-    const normalized = value.trim()
-    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(normalized)) {
-      if (normalized.length === 4) {
-        return (
-          "#" +
-          normalized[1] +
-          normalized[1] +
-          normalized[2] +
-          normalized[2] +
-          normalized[3] +
-          normalized[3]
-        )
-      }
-      return normalized
-    }
-    return fallback
   }
 
   function slugify(value, fallback) {
@@ -1662,13 +1643,13 @@
       this.attachShadow({ mode: "open" })
       this._hass = null
       this._config = null
+      this._lovelace = null
       this._section = "general"
       this._editingTabIndex = 0
       this._nativeEditors = new Map()
       this._loadingEditors = new Set()
       this._newCardType = "entity"
 
-      this._onRootInput = this._onRootInput.bind(this)
       this._onRootChange = this._onRootChange.bind(this)
       this._onRootClick = this._onRootClick.bind(this)
       this._onValueChanged = this._onValueChanged.bind(this)
@@ -1677,8 +1658,18 @@
     set hass(hass) {
       this._hass = hass
       this._hydrateHaControls()
+      this._mountCardPicker()
       this._nativeEditors.forEach((editor) => {
         editor.hass = hass
+      })
+    }
+
+    set lovelace(lovelace) {
+      this._lovelace = lovelace
+      this._hydrateHaControls()
+      this._mountCardPicker()
+      this._nativeEditors.forEach((editor) => {
+        editor.lovelace = lovelace
       })
     }
 
@@ -1714,23 +1705,8 @@
             gap: 6px;
           }
 
-          .nav button,
-          .action,
-          .icon-button {
-            appearance: none;
-            border: 1px solid var(--divider-color);
-            border-radius: 8px;
-            background: var(--secondary-background-color);
-            color: var(--primary-text-color);
-            min-height: 36px;
-            font: inherit;
-            cursor: pointer;
-          }
-
-          .nav button.active {
-            border-color: var(--primary-color);
-            color: var(--primary-color);
-            background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+          .nav ha-button {
+            width: 100%;
           }
 
           .panel {
@@ -1746,11 +1722,11 @@
           .tab-body,
           .card-item {
             display: grid;
-            gap: 10px;
+            gap: 12px;
             border: 1px solid var(--divider-color);
             border-radius: 8px;
             padding: 12px;
-            background: color-mix(in srgb, var(--card-background-color, #fff) 90%, transparent);
+            background: var(--card-background-color, var(--ha-card-background, #fff));
           }
 
           .section-title,
@@ -1855,7 +1831,22 @@
           }
 
           .danger {
-            border-color: var(--error-color, #ef4444);
+            color: var(--error-color, #ef4444);
+          }
+
+          ha-form {
+            display: block;
+          }
+
+          ha-form + ha-form {
+            margin-top: 8px;
+          }
+
+          ha-button.danger {
+            --mdc-theme-primary: var(--error-color, #ef4444);
+          }
+
+          ha-icon-button.danger {
             color: var(--error-color, #ef4444);
           }
 
@@ -1871,6 +1862,28 @@
           }
 
           .native-editor-host {
+            display: grid;
+            gap: 8px;
+          }
+
+          .card-picker-frame {
+            display: grid;
+            gap: 12px;
+            border: 1px dashed var(--divider-color);
+            border-radius: 8px;
+            padding: 12px;
+          }
+
+          .native-card-picker {
+            min-height: 120px;
+            overflow: hidden;
+          }
+
+          .native-card-picker hui-card-picker {
+            max-height: min(70vh, 720px);
+          }
+
+          .fallback-picker {
             display: grid;
             gap: 8px;
           }
@@ -1916,139 +1929,442 @@
         </div>
       `
 
-      this.shadowRoot.addEventListener("input", this._onRootInput)
+      this.shadowRoot.removeEventListener("change", this._onRootChange)
+      this.shadowRoot.removeEventListener("click", this._onRootClick)
+      this.shadowRoot.removeEventListener("value-changed", this._onValueChanged)
       this.shadowRoot.addEventListener("change", this._onRootChange)
       this.shadowRoot.addEventListener("click", this._onRootClick)
       this.shadowRoot.addEventListener("value-changed", this._onValueChanged)
       this._hydrateHaControls()
       this._mountNativeEditors()
+      this._mountCardPicker()
     }
 
     _navButton(section, label) {
-      return `<button type="button" data-action="section" data-section="${section}" class="${
-        this._section === section ? "active" : ""
-      }">${label}</button>`
+      const active = this._section === section
+      return `<ha-button appearance="${
+        active ? "filled" : "outlined"
+      }" type="button" data-action="section" data-section="${section}" class="${
+        active ? "active" : ""
+      }">${label}</ha-button>`
+    }
+
+    _haForm(form, tabIndex, cardIndex, conditionIndex) {
+      return `<ha-form data-form="${form}" ${this._dataAttrs(
+        tabIndex,
+        cardIndex,
+        conditionIndex
+      )}></ha-form>`
+    }
+
+    _optionList(options) {
+      return options.map(([value, label]) => ({ value, label }))
+    }
+
+    _availableCardTypeOptions() {
+      const customOptions = (window.customCards || [])
+        .filter((card) => card?.type && ![CARD_TYPE, ALT_CARD_TYPE].includes(card.type))
+        .map((card) => ["custom:" + card.type, card.name || "custom:" + card.type])
+      return this._optionList([...CORE_CARD_OPTIONS, ...customOptions])
+    }
+
+    _createCardTemplate(type) {
+      const normalized = asString(type, "entity")
+      const template = CARD_TEMPLATES[normalized] || CARD_TEMPLATES[normalized.replace(/^custom:/, "")]
+      return template ? clone(template) : { type: normalized }
+    }
+
+    _formSchema(form) {
+      const cardTypeOptions = this._availableCardTypeOptions()
+      const select = (options) => ({ select: { mode: "dropdown", options: this._optionList(options) } })
+      const cardSelect = { select: { mode: "dropdown", options: cardTypeOptions } }
+      const cssText = { text: {} }
+
+      switch (form) {
+        case "general":
+          return [
+            {
+              type: "grid",
+              name: "",
+              flatten: true,
+              column_min_width: "220px",
+              schema: [
+                { name: "defaultTabIndex", selector: { number: { min: 0, mode: "box" } } },
+                { name: "defaultTabId", selector: { text: {} } },
+                {
+                  name: "remember",
+                  selector: select([
+                    ["none", "None"],
+                    ["card", "This card"],
+                    ["browser", "Per browser path"],
+                    ["user", "Per Home Assistant user"],
+                  ]),
+                },
+                {
+                  name: "preload",
+                  selector: select([
+                    ["active", "Active tab only"],
+                    ["idle", "Active plus neighbors"],
+                    ["all", "All tabs"],
+                  ]),
+                },
+                { name: "maxCachedTabs", selector: { number: { min: 0, mode: "box" } } },
+                { name: "swipeThreshold", selector: { number: { min: 16, max: 180, mode: "box" } } },
+                { name: "keepAlive", selector: { boolean: {} } },
+                { name: "swipe", selector: { boolean: {} } },
+                { name: "haptic", selector: { boolean: {} } },
+                { name: "showIcons", selector: { boolean: {} } },
+                { name: "showLabels", selector: { boolean: {} } },
+                { name: "hideInactiveLabels", selector: { boolean: {} } },
+                { name: "deepLink", selector: { boolean: {} } },
+                { name: "updateHash", selector: { boolean: {} } },
+                { name: "hashPrefix", selector: { text: {} } },
+              ],
+            },
+          ]
+        case "appearance-layout":
+          return [
+            {
+              type: "grid",
+              name: "",
+              flatten: true,
+              column_min_width: "180px",
+              schema: [
+                {
+                  name: "tab_position",
+                  selector: select([
+                    ["top", "Top"],
+                    ["bottom", "Bottom"],
+                    ["left", "Left"],
+                    ["right", "Right"],
+                  ]),
+                },
+                {
+                  name: "alignment",
+                  selector: select([
+                    ["start", "Start"],
+                    ["center", "Center"],
+                    ["end", "End"],
+                    ["stretch", "Stretch"],
+                  ]),
+                },
+                {
+                  name: "variant",
+                  selector: select([
+                    ["pills", "Pills"],
+                    ["segmented", "Segmented"],
+                    ["underline", "Underline"],
+                    ["minimal", "Minimal"],
+                  ]),
+                },
+                {
+                  name: "density",
+                  selector: select([
+                    ["compact", "Compact"],
+                    ["comfortable", "Comfortable"],
+                  ]),
+                },
+                {
+                  name: "icon_position",
+                  selector: select([
+                    ["inline", "Inline"],
+                    ["stacked", "Stacked"],
+                  ]),
+                },
+                { name: "equal_width", selector: { boolean: {} } },
+                { name: "wrap_tabs", selector: { boolean: {} } },
+              ],
+            },
+          ]
+        case "appearance-colors":
+          return [
+            {
+              type: "grid",
+              name: "",
+              flatten: true,
+              column_min_width: "220px",
+              schema: [
+                { name: "background_color", selector: cssText },
+                { name: "panel_background", selector: cssText },
+                { name: "bar_background", selector: cssText },
+                { name: "text_color", selector: cssText },
+                { name: "active_color", selector: cssText },
+                { name: "active_text_color", selector: cssText },
+                { name: "inactive_color", selector: cssText },
+                { name: "border_color", selector: cssText },
+                { name: "badge_color", selector: cssText },
+              ],
+            },
+          ]
+        case "appearance-spacing":
+          return [
+            {
+              type: "grid",
+              name: "",
+              flatten: true,
+              column_min_width: "180px",
+              schema: [
+                { name: "radius", selector: cssText },
+                { name: "tab_radius", selector: cssText },
+                { name: "shadow", selector: cssText },
+                { name: "tab_padding", selector: cssText },
+                { name: "header_padding", selector: cssText },
+                { name: "panel_padding", selector: cssText },
+                { name: "tab_gap", selector: cssText },
+                { name: "content_gap", selector: cssText },
+                { name: "min_height", selector: cssText },
+              ],
+            },
+          ]
+        case "tab":
+          return [
+            {
+              type: "grid",
+              name: "",
+              flatten: true,
+              column_min_width: "220px",
+              schema: [
+                { name: "label", selector: { text: {} } },
+                { name: "icon", selector: { icon: {} } },
+                { name: "id", selector: { text: {} } },
+                { name: "hidden", selector: { boolean: {} } },
+                { name: "disabled", selector: { boolean: {} } },
+                { name: "accent_color", selector: cssText },
+                { name: "panel_padding", selector: cssText },
+                { name: "panel_background", selector: cssText },
+              ],
+            },
+          ]
+        case "badge":
+          return [
+            {
+              type: "grid",
+              name: "",
+              flatten: true,
+              column_min_width: "220px",
+              schema: [
+                {
+                  name: "mode",
+                  selector: select([
+                    ["none", "None"],
+                    ["dot", "Dot"],
+                    ["count", "Count"],
+                    ["text", "Text"],
+                    ["exclamation", "Exclamation"],
+                    ["state", "Entity state"],
+                  ]),
+                },
+                { name: "entity", selector: { entity: {} } },
+                { name: "state", selector: { text: {} } },
+                { name: "text", selector: { text: {} } },
+                { name: "template", selector: { template: {} } },
+              ],
+            },
+          ]
+        case "condition":
+          return [
+            {
+              type: "grid",
+              name: "",
+              flatten: true,
+              column_min_width: "220px",
+              schema: [
+                {
+                  name: "type",
+                  selector: select([
+                    ["entity", "Entity"],
+                    ["user", "User"],
+                    ["media", "Media query"],
+                    ["template", "Template"],
+                  ]),
+                },
+                { name: "entity", selector: { entity: {} } },
+                { name: "attribute", selector: { text: {} } },
+                { name: "state", selector: { text: {} } },
+                { name: "state_not", selector: { text: {} } },
+                { name: "above", selector: { text: {} } },
+                { name: "below", selector: { text: {} } },
+                { name: "user", selector: { text: {} } },
+                { name: "user_not", selector: { text: {} } },
+                { name: "media_query", selector: { text: {} } },
+                { name: "template", selector: { template: {} } },
+              ],
+            },
+          ]
+        case "card-basic":
+          return [
+            {
+              type: "grid",
+              name: "",
+              flatten: true,
+              column_min_width: "220px",
+              schema: [
+                { name: "type", selector: cardSelect },
+                { name: "entity", selector: { entity: {} } },
+                { name: "title", selector: { text: {} } },
+                { name: "content", selector: { text: { multiline: true } } },
+              ],
+            },
+          ]
+        case "new-card":
+          return [{ name: "type", selector: cardSelect }]
+        default:
+          return []
+      }
+    }
+
+    _formData(form, target) {
+      const tabIndex = Number(target?.dataset?.tabIndex)
+      const cardIndex = Number(target?.dataset?.cardIndex)
+      const conditionIndex = Number(target?.dataset?.conditionIndex)
+      const tab = this._config.tabs[Number.isFinite(tabIndex) ? tabIndex : this._editingTabIndex]
+
+      switch (form) {
+        case "general":
+          return { ...this._config.options }
+        case "appearance-layout":
+        case "appearance-colors":
+        case "appearance-spacing":
+          return { ...this._config.styles }
+        case "tab":
+          return {
+            ...tab.attributes,
+            accent_color: tab.styles?.accent_color || "",
+            panel_padding: tab.styles?.panel_padding || "",
+            panel_background: tab.styles?.panel_background || "",
+          }
+        case "badge":
+          return { ...tab.badge }
+        case "condition":
+          return { ...(tab.conditions[conditionIndex] || {}) }
+        case "card-basic": {
+          const card = tab.cards[cardIndex] || {}
+          const firstEntity = Array.isArray(card.entities) ? card.entities[0] : ""
+          const entity = card.entity || (isObject(firstEntity) ? firstEntity.entity : firstEntity) || ""
+          return {
+            type: card.type || "entity",
+            entity,
+            title: card.title || card.name || "",
+            content: card.content || "",
+          }
+        }
+        case "new-card":
+          return { type: this._newCardType }
+        default:
+          return {}
+      }
+    }
+
+    _computeFormLabel(schema) {
+      const labels = {
+        defaultTabIndex: "Default tab index",
+        defaultTabId: "Default tab id",
+        remember: "Remember tab",
+        preload: "Preload",
+        maxCachedTabs: "Max cached tabs",
+        swipeThreshold: "Swipe threshold",
+        keepAlive: "Keep inactive cards alive",
+        swipe: "Swipe navigation",
+        haptic: "Haptic feedback",
+        showIcons: "Show icons",
+        showLabels: "Show labels",
+        hideInactiveLabels: "Hide inactive labels",
+        deepLink: "Deep links",
+        updateHash: "Update URL hash",
+        hashPrefix: "Hash prefix",
+        tab_position: "Tab position",
+        alignment: "Alignment",
+        variant: "Variant",
+        density: "Density",
+        icon_position: "Icon position",
+        equal_width: "Equal width tabs",
+        wrap_tabs: "Wrap tabs",
+        background_color: "Background",
+        panel_background: "Panel background",
+        bar_background: "Tab bar background",
+        text_color: "Text color",
+        active_color: "Active color",
+        active_text_color: "Active text color",
+        inactive_color: "Inactive color",
+        border_color: "Border color",
+        badge_color: "Badge color",
+        radius: "Card radius",
+        tab_radius: "Tab radius",
+        shadow: "Shadow",
+        tab_padding: "Tab padding",
+        header_padding: "Header padding",
+        panel_padding: "Panel padding",
+        tab_gap: "Tab gap",
+        content_gap: "Content gap",
+        min_height: "Minimum height",
+        label: "Label",
+        icon: "Icon",
+        id: "Deep-link id",
+        hidden: "Hidden",
+        disabled: "Disabled",
+        accent_color: "Tab accent",
+        mode: "Mode",
+        entity: "Entity",
+        state: "State rule",
+        state_not: "State not",
+        text: "Text",
+        template: "Template",
+        type: "Type",
+        attribute: "Attribute",
+        above: "Above",
+        below: "Below",
+        user: "User ids",
+        user_not: "Excluded user ids",
+        media_query: "Media query",
+        title: "Title",
+        content: "Markdown content",
+      }
+      return labels[schema.name]
+    }
+
+    _computeFormHelper(schema) {
+      const helpers = {
+        defaultTabId: "Use the tab deep-link id when you prefer a stable default.",
+        maxCachedTabs: "0 keeps every opened tab cached.",
+        hashPrefix: "Optional prefix used before tab ids in the URL hash.",
+        template: "Home Assistant template returning true/text, depending on the field.",
+        type: "Pick from Home Assistant card types and installed custom cards.",
+        content: "Used by markdown cards.",
+      }
+      return helpers[schema.name]
     }
 
     _renderGeneralPanel() {
-      const options = this._config.options
       return `
         <div class="section">
           <div class="section-title">Behavior</div>
-          <div class="grid-3">
-            ${this._numberField("Default tab index", "options.defaultTabIndex", options.defaultTabIndex, 0)}
-            ${this._textField("Default tab id", "options.defaultTabId", options.defaultTabId, "overview")}
-            ${this._selectField("Remember tab", "options.remember", options.remember, [
-              ["none", "None"],
-              ["card", "This card"],
-              ["browser", "Per browser path"],
-              ["user", "Per Home Assistant user"],
-            ])}
-          </div>
-          <div class="grid-3">
-            ${this._selectField("Preload", "options.preload", options.preload, [
-              ["active", "Active tab only"],
-              ["idle", "Active plus neighbors"],
-              ["all", "All tabs"],
-            ])}
-            ${this._numberField("Max cached tabs", "options.maxCachedTabs", options.maxCachedTabs, 0)}
-            ${this._numberField("Swipe threshold", "options.swipeThreshold", options.swipeThreshold, 16)}
-          </div>
-          <div class="grid-3">
-            ${this._checkboxField("Keep inactive cards alive", "options.keepAlive", options.keepAlive)}
-            ${this._checkboxField("Swipe navigation", "options.swipe", options.swipe)}
-            ${this._checkboxField("Haptic feedback", "options.haptic", options.haptic)}
-          </div>
-          <div class="grid-3">
-            ${this._checkboxField("Show icons", "options.showIcons", options.showIcons)}
-            ${this._checkboxField("Show labels", "options.showLabels", options.showLabels)}
-            ${this._checkboxField("Hide inactive labels", "options.hideInactiveLabels", options.hideInactiveLabels)}
-          </div>
-          <div class="grid-3">
-            ${this._checkboxField("Deep links", "options.deepLink", options.deepLink)}
-            ${this._checkboxField("Update URL hash", "options.updateHash", options.updateHash)}
-            ${this._textField("Hash prefix", "options.hashPrefix", options.hashPrefix, "room-")}
-          </div>
+          ${this._haForm("general")}
         </div>
       `
     }
 
     _renderAppearancePanel() {
-      const styles = this._config.styles
       return `
         <div class="section">
           <div class="section-title">Presets</div>
           <div class="toolbar">
-            <button class="action" type="button" data-action="preset" data-preset="material">Material</button>
-            <button class="action" type="button" data-action="preset" data-preset="pills">Pills</button>
-            <button class="action" type="button" data-action="preset" data-preset="segmented">Segmented</button>
-            <button class="action" type="button" data-action="preset" data-preset="minimal">Minimal</button>
+            <ha-button appearance="outlined" type="button" data-action="preset" data-preset="material">Material</ha-button>
+            <ha-button appearance="outlined" type="button" data-action="preset" data-preset="pills">Pills</ha-button>
+            <ha-button appearance="outlined" type="button" data-action="preset" data-preset="segmented">Segmented</ha-button>
+            <ha-button appearance="outlined" type="button" data-action="preset" data-preset="minimal">Minimal</ha-button>
           </div>
         </div>
         <div class="section">
           <div class="section-title">Layout</div>
-          <div class="grid-4">
-            ${this._selectField("Tab position", "styles.tab_position", styles.tab_position, [
-              ["top", "Top"],
-              ["bottom", "Bottom"],
-              ["left", "Left"],
-              ["right", "Right"],
-            ])}
-            ${this._selectField("Alignment", "styles.alignment", styles.alignment, [
-              ["start", "Start"],
-              ["center", "Center"],
-              ["end", "End"],
-              ["stretch", "Stretch"],
-            ])}
-            ${this._selectField("Variant", "styles.variant", styles.variant, [
-              ["pills", "Pills"],
-              ["segmented", "Segmented"],
-              ["underline", "Underline"],
-              ["minimal", "Minimal"],
-            ])}
-            ${this._selectField("Density", "styles.density", styles.density, [
-              ["compact", "Compact"],
-              ["comfortable", "Comfortable"],
-            ])}
-          </div>
-          <div class="grid-3">
-            ${this._selectField("Icon position", "styles.icon_position", styles.icon_position, [
-              ["inline", "Inline"],
-              ["stacked", "Stacked"],
-            ])}
-            ${this._checkboxField("Equal width tabs", "styles.equal_width", styles.equal_width)}
-            ${this._checkboxField("Wrap tabs", "styles.wrap_tabs", styles.wrap_tabs)}
-          </div>
+          ${this._haForm("appearance-layout")}
         </div>
         <div class="section">
           <div class="section-title">Colors</div>
-          ${this._colorPair("Background", "styles.background_color", styles.background_color, "#ffffff")}
-          ${this._colorPair("Panel background", "styles.panel_background", styles.panel_background, "#ffffff")}
-          ${this._colorPair("Tab bar background", "styles.bar_background", styles.bar_background, "#ffffff")}
-          ${this._colorPair("Text", "styles.text_color", styles.text_color, "#111111")}
-          ${this._colorPair("Active", "styles.active_color", styles.active_color, "#03a9f4")}
-          ${this._colorPair("Active text", "styles.active_text_color", styles.active_text_color, "#ffffff")}
-          ${this._colorPair("Inactive", "styles.inactive_color", styles.inactive_color, "#777777")}
-          ${this._colorPair("Border", "styles.border_color", styles.border_color, "#dddddd")}
-          ${this._colorPair("Badge", "styles.badge_color", styles.badge_color, "#ef4444")}
+          ${this._haForm("appearance-colors")}
         </div>
         <div class="section">
           <div class="section-title">Spacing and shape</div>
-          <div class="grid-3">
-            ${this._textField("Card radius", "styles.radius", styles.radius, "12px")}
-            ${this._textField("Tab radius", "styles.tab_radius", styles.tab_radius, "10px")}
-            ${this._textField("Shadow", "styles.shadow", styles.shadow, "none")}
-          </div>
-          <div class="grid-3">
-            ${this._textField("Tab padding", "styles.tab_padding", styles.tab_padding, "9px 12px")}
-            ${this._textField("Header padding", "styles.header_padding", styles.header_padding, "8px")}
-            ${this._textField("Panel padding", "styles.panel_padding", styles.panel_padding, "10px")}
-          </div>
-          <div class="grid-3">
-            ${this._textField("Tab gap", "styles.tab_gap", styles.tab_gap, "6px")}
-            ${this._textField("Content gap", "styles.content_gap", styles.content_gap, "10px")}
-            ${this._textField("Min height", "styles.min_height", styles.min_height, "0px")}
-          </div>
+          ${this._haForm("appearance-spacing")}
         </div>
       `
     }
@@ -2070,52 +2386,23 @@
       return `
         <div class="section">
           <div class="toolbar">
-            <button class="action" type="button" data-action="add-tab">Add tab</button>
-            <button class="action" type="button" data-action="duplicate-tab" data-tab-index="${
+            <ha-button appearance="filled" type="button" data-action="add-tab">Add tab</ha-button>
+            <ha-button appearance="outlined" type="button" data-action="duplicate-tab" data-tab-index="${
               this._editingTabIndex
-            }">Duplicate tab</button>
-            <button class="action danger" type="button" data-action="delete-tab" data-tab-index="${
+            }">Duplicate tab</ha-button>
+            <ha-button appearance="outlined" type="button" data-action="delete-tab" data-tab-index="${
               this._editingTabIndex
-            }">Delete tab</button>
+            }" class="danger">Delete tab</ha-button>
           </div>
           <div class="tab-list">${tabButtons}</div>
         </div>
         <div class="tab-body">
           <div class="section-title">Selected tab</div>
-          <div class="grid-3">
-            ${this._textField("Label", "tab.label", tab.attributes.label, "Overview", this._editingTabIndex)}
-            ${this._iconField("Icon", "tab.icon", tab.attributes.icon, "mdi:home", this._editingTabIndex)}
-            ${this._textField("Deep-link id", "tab.id", tab.attributes.id, "overview", this._editingTabIndex)}
-          </div>
-          <div class="grid-3">
-            ${this._checkboxField("Hidden", "tab.hidden", tab.attributes.hidden, this._editingTabIndex)}
-            ${this._checkboxField("Disabled", "tab.disabled", tab.attributes.disabled, this._editingTabIndex)}
-            <button class="action" type="button" data-action="make-default" data-tab-index="${
+          ${this._haForm("tab", this._editingTabIndex)}
+          <div class="toolbar">
+            <ha-button appearance="outlined" type="button" data-action="make-default" data-tab-index="${
               this._editingTabIndex
-            }">Make default</button>
-          </div>
-          <div class="grid-3">
-            ${this._colorPair(
-              "Tab accent",
-              "tab.styles.accent_color",
-              tab.styles?.accent_color || "",
-              "#03a9f4",
-              this._editingTabIndex
-            )}
-            ${this._textField(
-              "Panel padding",
-              "tab.styles.panel_padding",
-              tab.styles?.panel_padding || "",
-              "10px",
-              this._editingTabIndex
-            )}
-            ${this._textField(
-              "Panel background",
-              "tab.styles.panel_background",
-              tab.styles?.panel_background || "",
-              "transparent",
-              this._editingTabIndex
-            )}
+            }">Make default</ha-button>
           </div>
         </div>
         ${this._renderBadgePanel(tab)}
@@ -2128,20 +2415,7 @@
       return `
         <div class="section">
           <div class="section-title">Badge</div>
-          <div class="grid-4">
-            ${this._selectField("Mode", "tab.badge.mode", tab.badge.mode, [
-              ["none", "None"],
-              ["dot", "Dot"],
-              ["count", "Count"],
-              ["text", "Text"],
-              ["exclamation", "Exclamation"],
-              ["state", "Entity state"],
-            ], this._editingTabIndex)}
-            ${this._entityField("Entity", "tab.badge.entity", tab.badge.entity, this._editingTabIndex)}
-            ${this._textField("State rule", "tab.badge.state", tab.badge.state, "> 0", this._editingTabIndex)}
-            ${this._textField("Text", "tab.badge.text", tab.badge.text, "!", this._editingTabIndex)}
-          </div>
-          ${this._textField("Template", "tab.badge.template", tab.badge.template, "{{ ... }}", this._editingTabIndex)}
+          ${this._haForm("badge", this._editingTabIndex)}
         </div>
       `
     }
@@ -2157,9 +2431,9 @@
         <div class="section">
           <div class="section-title">Visibility conditions</div>
           ${conditions}
-          <button class="action" type="button" data-action="add-condition" data-tab-index="${
+          <ha-button appearance="outlined" type="button" data-action="add-condition" data-tab-index="${
             this._editingTabIndex
-          }">Add condition</button>
+          }">Add condition</ha-button>
         </div>
       `
     }
@@ -2167,25 +2441,10 @@
     _renderCondition(condition, index) {
       return `
         <div class="section" data-condition-index="${index}">
-          <div class="grid-4">
-            ${this._selectField("Type", "condition.type", condition.type, [
-              ["entity", "Entity"],
-              ["user", "User"],
-              ["media", "Media query"],
-              ["template", "Template"],
-            ], this._editingTabIndex, undefined, index)}
-            ${this._entityField("Entity", "condition.entity", condition.entity || "", this._editingTabIndex, undefined, index)}
-            ${this._textField("State", "condition.state", condition.state || "", "on or > 0", this._editingTabIndex, undefined, index)}
-            ${this._textField("State not", "condition.state_not", condition.state_not || "", "off", this._editingTabIndex, undefined, index)}
-          </div>
-          <div class="grid-3">
-            ${this._textField("User ids", "condition.user", condition.user || "", "id1,id2", this._editingTabIndex, undefined, index)}
-            ${this._textField("Media query", "condition.media_query", condition.media_query || "", "(max-width: 720px)", this._editingTabIndex, undefined, index)}
-            ${this._textField("Template", "condition.template", condition.template || "", "{{ is_state(...) }}", this._editingTabIndex, undefined, index)}
-          </div>
-          <button class="action danger" type="button" data-action="delete-condition" data-tab-index="${
+          ${this._haForm("condition", this._editingTabIndex, undefined, index)}
+          <ha-button appearance="outlined" type="button" data-action="delete-condition" data-tab-index="${
             this._editingTabIndex
-          }" data-condition-index="${index}">Remove condition</button>
+          }" data-condition-index="${index}" class="danger">Remove condition</ha-button>
         </div>
       `
     }
@@ -2198,21 +2457,19 @@
         <div class="section">
           <div class="section-title">Cards in this tab</div>
           ${cards}
-          <div class="grid-3">
-            ${this._selectField("New card type", "editor.newCardType", this._newCardType, [
-              ["entity", "Entity"],
-              ["entities", "Entities"],
-              ["tile", "Tile"],
-              ["button", "Button"],
-              ["markdown", "Markdown"],
-              ["thermostat", "Thermostat"],
-              ["gauge", "Gauge"],
-              ["glance", "Glance"],
-              ["history", "History graph"],
-            ])}
-            <button class="action" type="button" data-action="add-card" data-tab-index="${
+          <div class="card-picker-frame">
+            <div class="section-title">Add a card</div>
+            <div class="native-card-picker" id="native-card-picker-${this._editingTabIndex}" data-tab-index="${
               this._editingTabIndex
-            }">Add card</button>
+            }">
+              <div class="muted">Home Assistant card picker is loading.</div>
+            </div>
+            <div class="fallback-picker">
+              ${this._haForm("new-card", this._editingTabIndex)}
+              <ha-button appearance="filled" type="button" data-action="add-card" data-tab-index="${
+              this._editingTabIndex
+            }">Add selected card</ha-button>
+            </div>
           </div>
         </div>
       `
@@ -2220,36 +2477,24 @@
 
     _renderCardItem(card, index) {
       const key = this._nativeKey(this._editingTabIndex, index)
-      const firstEntity = Array.isArray(card.entities) ? card.entities[0] : ""
-      const primaryEntity = card.entity || (isObject(firstEntity) ? firstEntity.entity : firstEntity) || ""
       return `
         <div class="card-item" data-card-index="${index}">
           <div class="card-title">${escapeHtml(summarizeCard(card))}</div>
           <div class="card-actions">
-            <button class="icon-button" type="button" title="Move up" data-action="move-card-up" data-tab-index="${
+            <ha-icon-button type="button" label="Move up" title="Move up" data-action="move-card-up" data-tab-index="${
               this._editingTabIndex
-            }" data-card-index="${index}"><ha-icon icon="mdi:arrow-up"></ha-icon></button>
-            <button class="icon-button" type="button" title="Move down" data-action="move-card-down" data-tab-index="${
+            }" data-card-index="${index}"><ha-icon icon="mdi:arrow-up"></ha-icon></ha-icon-button>
+            <ha-icon-button type="button" label="Move down" title="Move down" data-action="move-card-down" data-tab-index="${
               this._editingTabIndex
-            }" data-card-index="${index}"><ha-icon icon="mdi:arrow-down"></ha-icon></button>
-            <button class="action" type="button" data-action="duplicate-card" data-tab-index="${
+            }" data-card-index="${index}"><ha-icon icon="mdi:arrow-down"></ha-icon></ha-icon-button>
+            <ha-button appearance="outlined" type="button" data-action="duplicate-card" data-tab-index="${
               this._editingTabIndex
-            }" data-card-index="${index}">Duplicate</button>
-            <button class="action danger" type="button" data-action="delete-card" data-tab-index="${
+            }" data-card-index="${index}">Duplicate</ha-button>
+            <ha-button appearance="outlined" type="button" data-action="delete-card" data-tab-index="${
               this._editingTabIndex
-            }" data-card-index="${index}">Delete</button>
+            }" data-card-index="${index}" class="danger">Delete</ha-button>
           </div>
-          <div class="grid-3">
-            ${this._textField("Type", "card.type", card.type || "", "entity", this._editingTabIndex, index)}
-            ${this._entityField("Entity", "card.entity", primaryEntity, this._editingTabIndex, index)}
-            ${this._textField("Title/name", "card.title", card.title || card.name || "", "Living room", this._editingTabIndex, index)}
-          </div>
-          <label>
-            Markdown content
-            <textarea data-field="card.content" data-tab-index="${this._editingTabIndex}" data-card-index="${index}">${escapeHtml(
-              card.content || ""
-            )}</textarea>
-          </label>
+          ${this._haForm("card-basic", this._editingTabIndex, index)}
           <div class="native-editor-host" id="native-editor-${key}">
             <div class="muted">Native visual editor loads here when this card type provides one.</div>
           </div>
@@ -2274,106 +2519,6 @@
       `
     }
 
-    _textField(label, field, value, placeholder = "", tabIndex, cardIndex, conditionIndex) {
-      return `
-        <label>
-          ${escapeHtml(label)}
-          <input data-field="${field}" ${this._dataAttrs(
-            tabIndex,
-            cardIndex,
-            conditionIndex
-          )} value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" />
-        </label>
-      `
-    }
-
-    _numberField(label, field, value, min = 0) {
-      return `
-        <label>
-          ${escapeHtml(label)}
-          <input type="number" min="${min}" step="1" data-field="${field}" value="${escapeHtml(value)}" />
-        </label>
-      `
-    }
-
-    _checkboxField(label, field, checked, tabIndex) {
-      return `
-        <label class="toggle">
-          <input type="checkbox" data-field="${field}" ${this._dataAttrs(tabIndex)} ${
-            checked ? "checked" : ""
-          } />
-          <span>${escapeHtml(label)}</span>
-        </label>
-      `
-    }
-
-    _selectField(label, field, value, options, tabIndex, cardIndex, conditionIndex) {
-      const optionHtml = options
-        .map(
-          ([optionValue, optionLabel]) =>
-            `<option value="${escapeHtml(optionValue)}" ${
-              optionValue === value ? "selected" : ""
-            }>${escapeHtml(optionLabel)}</option>`
-        )
-        .join("")
-      return `
-        <label>
-          ${escapeHtml(label)}
-          <select data-field="${field}" ${this._dataAttrs(tabIndex, cardIndex, conditionIndex)}>
-            ${optionHtml}
-          </select>
-        </label>
-      `
-    }
-
-    _colorPair(label, field, value, fallback, tabIndex) {
-      const pickerField = field + "__picker"
-      return `
-        <div class="grid-2">
-          <label>
-            ${escapeHtml(label)}
-            <input type="color" data-field="${pickerField}" ${this._dataAttrs(tabIndex)} value="${safeColor(
-              value,
-              fallback
-            )}" />
-          </label>
-          ${this._textField(label + " CSS value", field, value, fallback, tabIndex)}
-        </div>
-      `
-    }
-
-    _entityField(label, field, value, tabIndex, cardIndex, conditionIndex) {
-      return `
-        <label>
-          ${escapeHtml(label)}
-          <ha-entity-picker data-field="${field}" ${this._dataAttrs(
-            tabIndex,
-            cardIndex,
-            conditionIndex
-          )} data-current="${escapeHtml(value)}"></ha-entity-picker>
-          <input data-field="${field}" ${this._dataAttrs(
-            tabIndex,
-            cardIndex,
-            conditionIndex
-          )} value="${escapeHtml(value)}" placeholder="domain.entity" />
-        </label>
-      `
-    }
-
-    _iconField(label, field, value, placeholder, tabIndex) {
-      return `
-        <label>
-          ${escapeHtml(label)}
-          <ha-icon-picker data-field="${field}" data-tab-index="${tabIndex}" data-current="${escapeHtml(
-            value
-          )}"></ha-icon-picker>
-          <input data-field="${field}" data-tab-index="${tabIndex}" value="${escapeHtml(
-            value
-          )}" placeholder="${escapeHtml(placeholder)}" />
-        </label>
-      `
-    }
-
     _dataAttrs(tabIndex, cardIndex, conditionIndex) {
       return [
         tabIndex !== undefined ? `data-tab-index="${tabIndex}"` : "",
@@ -2384,67 +2529,40 @@
         .join(" ")
     }
 
-    _onRootInput(event) {
-      const target = event.target
-      const field = target?.dataset?.field
-      if (!field || !this._config || target.tagName?.startsWith("HA-")) return
-      if (field.endsWith("__picker")) {
-        const realField = field.replace("__picker", "")
-      this._applyField(realField, target.value, target)
-        this._syncCssValue(realField, target.value)
-        this._emit(false)
-        return
-      }
-      if (field === "card.json") return
-      this._applyField(field, this._targetValue(target), target)
-      this._emit(false)
-    }
-
     _onRootChange(event) {
       const target = event.target
       const field = target?.dataset?.field
       if (!field || !this._config || target.tagName?.startsWith("HA-")) return
-      if (field.endsWith("__picker")) {
-        const realField = field.replace("__picker", "")
-        this._applyField(realField, target.value, target)
-        this._syncCssValue(realField, target.value)
-        this._emit(false)
-        return
-      }
       if (field === "card.json") {
         this._applyCardJson(Number(target.dataset.tabIndex), Number(target.dataset.cardIndex), target.value)
-        return
       }
-      this._applyField(field, this._targetValue(target), target)
-      this._emit(this._fieldNeedsRender(field))
     }
 
     _onValueChanged(event) {
-      const target = event.target
-      const field = target?.dataset?.field
-      if (!field || !this._config) return
-      event.stopPropagation()
-      const value = event.detail?.value ?? target.value ?? ""
-      this._applyField(field, value, target)
-      this._syncDuplicateInputs(target, field, value)
-      this._emit(this._fieldNeedsRender(field))
+      const formTarget = this._eventDataTarget(event, "form")
+      if (formTarget) {
+        event.stopPropagation()
+        this._applyFormData(formTarget.dataset.form, event.detail?.value || {}, formTarget)
+        return
+      }
     }
 
     _onRootClick(event) {
-      const action = event.target?.dataset?.action
+      const actionTarget = this._eventDataTarget(event, "action")
+      const action = actionTarget?.dataset?.action
       if (!action || !this._config) return
-      const tabIndex = Number(event.target.dataset.tabIndex)
-      const cardIndex = Number(event.target.dataset.cardIndex)
-      const conditionIndex = Number(event.target.dataset.conditionIndex)
+      const tabIndex = Number(actionTarget.dataset.tabIndex)
+      const cardIndex = Number(actionTarget.dataset.cardIndex)
+      const conditionIndex = Number(actionTarget.dataset.conditionIndex)
 
       if (action === "section") {
-        this._section = event.target.dataset.section
+        this._section = actionTarget.dataset.section
         this._render()
         return
       }
 
       if (action === "preset") {
-        Object.assign(this._config.styles, STYLE_PRESETS[event.target.dataset.preset] || {})
+        Object.assign(this._config.styles, STYLE_PRESETS[actionTarget.dataset.preset] || {})
         this._emit(true)
         return
       }
@@ -2520,8 +2638,7 @@
       }
 
       if (action === "add-card") {
-        const template = CARD_TEMPLATES[this._newCardType] || CARD_TEMPLATES.entity
-        this._config.tabs[tabIndex].cards.push(clone(template))
+        this._config.tabs[tabIndex].cards.push(this._createCardTemplate(this._newCardType))
         this._emit(true)
         return
       }
@@ -2553,122 +2670,118 @@
       }
     }
 
-    _targetValue(target) {
-      if (target.type === "checkbox") return target.checked
-      if (target.type === "number") return toNumber(target.value, 0)
-      return target.value
+    _eventDataTarget(event, key) {
+      const path = typeof event.composedPath === "function" ? event.composedPath() : []
+      for (const item of path) {
+        if (item?.dataset && key in item.dataset) return item
+      }
+      return event.target?.closest?.(`[data-${key}]`) || null
     }
 
-    _fieldNeedsRender(field) {
-      return (
-        field === "editor.newCardType" ||
-        field === "card.type" ||
-        field === "condition.type" ||
-        field === "tab.badge.mode"
-      )
-    }
-
-    _applyField(field, value, target) {
-      if (field === "editor.newCardType") {
-        this._newCardType = value
-        return
-      }
-
-      if (field.startsWith("options.")) {
-        const key = field.slice(8)
-        this._config.options[key] = value
-        if (key === "defaultTabIndex") {
-          this._config.options.defaultTabIndex = clamp(
-            toNumber(value, 0),
-            0,
-            this._config.tabs.length - 1
-          )
-        }
-        return
-      }
-
-      if (field.startsWith("styles.")) {
-        this._config.styles[field.slice(7)] = value
-        return
-      }
-
+    _applyFormData(form, value, target) {
       const tabIndex = Number(target?.dataset?.tabIndex)
       const cardIndex = Number(target?.dataset?.cardIndex)
       const conditionIndex = Number(target?.dataset?.conditionIndex)
       const tab = this._config.tabs[Number.isFinite(tabIndex) ? tabIndex : this._editingTabIndex]
+
+      if (form === "general") {
+        Object.assign(this._config.options, value)
+        this._config.options.defaultTabIndex = clamp(
+          toNumber(this._config.options.defaultTabIndex, 0),
+          0,
+          this._config.tabs.length - 1
+        )
+        this._config.options.maxCachedTabs = Math.max(
+          0,
+          toNumber(this._config.options.maxCachedTabs, 0)
+        )
+        this._config.options.swipeThreshold = clamp(
+          toNumber(this._config.options.swipeThreshold, 48),
+          16,
+          180
+        )
+        this._emit(false)
+        return
+      }
+
+      if (form.startsWith("appearance-")) {
+        Object.assign(this._config.styles, value)
+        this._emit(false)
+        return
+      }
+
       if (!tab) return
 
-      if (field.startsWith("tab.styles.")) {
+      if (form === "tab") {
+        tab.attributes.label = asString(value.label, tab.attributes.label)
+        tab.attributes.icon = asString(value.icon, "")
+        tab.attributes.id = slugify(value.id, tab.attributes.id || "tab")
+        tab.attributes.hidden = asBool(value.hidden, false)
+        tab.attributes.disabled = asBool(value.disabled, false)
         tab.styles = tab.styles || {}
-        tab.styles[field.slice(11)] = value
+        tab.styles.accent_color = asString(value.accent_color, "")
+        tab.styles.panel_padding = asString(value.panel_padding, "")
+        tab.styles.panel_background = asString(value.panel_background, "")
+        this._emit(true)
         return
       }
 
-      if (field.startsWith("tab.badge.")) {
-        tab.badge[field.slice(10)] = value
+      if (form === "badge") {
+        tab.badge = {
+          ...tab.badge,
+          mode: enumValue(value.mode, ["none", "dot", "count", "text", "exclamation", "state"], "none"),
+          entity: asString(value.entity, ""),
+          state: asString(value.state, ""),
+          text: asString(value.text, ""),
+          template: asString(value.template, ""),
+        }
+        this._emit(false)
         return
       }
 
-      if (field === "tab.label") {
-        tab.attributes.label = value
-        return
-      }
-      if (field === "tab.icon") {
-        tab.attributes.icon = value
-        return
-      }
-      if (field === "tab.id") {
-        tab.attributes.id = slugify(value, tab.attributes.id || "tab")
-        return
-      }
-      if (field === "tab.hidden") {
-        tab.attributes.hidden = value
-        return
-      }
-      if (field === "tab.disabled") {
-        tab.attributes.disabled = value
-        return
-      }
-
-      if (field.startsWith("condition.")) {
+      if (form === "condition") {
         const condition = tab.conditions[conditionIndex]
         if (!condition) return
-        condition[field.slice(10)] = value
+        Object.assign(condition, value)
+        condition.type = enumValue(condition.type, ["entity", "user", "media", "template"], "entity")
+        this._emit(false)
         return
       }
 
-      if (field.startsWith("card.")) {
+      if (form === "card-basic") {
         const card = tab.cards[cardIndex]
         if (!card) return
-        const key = field.slice(5)
-        if (key === "title") {
-          card.title = value
-          if ("name" in card) card.name = value
-        } else if (key === "entity" && Array.isArray(card.entities)) {
-          card.entities = value ? [value] : []
+        const nextType = asString(value.type, card.type || "entity")
+        const typeChanged = nextType && nextType !== card.type
+        if (typeChanged) {
+          const replacement = this._createCardTemplate(nextType)
+          tab.cards[cardIndex] = Object.assign(replacement, {
+            entity: value.entity || replacement.entity,
+            title: value.title || replacement.title,
+            content: value.content || replacement.content,
+          })
         } else {
-          card[key] = value
+          card.type = nextType
+          if (Array.isArray(card.entities)) {
+            card.entities = value.entity ? [value.entity] : []
+          } else if (value.entity !== undefined) {
+            card.entity = value.entity
+          }
+          if (value.title !== undefined) {
+            card.title = value.title
+            if ("name" in card) card.name = value.title
+          }
+          if (value.content !== undefined) {
+            card.content = value.content
+          }
         }
+        this._emit(typeChanged)
+        return
       }
-    }
 
-    _syncCssValue(field, value) {
-      const input = this.shadowRoot.querySelector(`input[data-field="${field}"]`)
-      if (input) input.value = value
-    }
-
-    _syncDuplicateInputs(source, field, value) {
-      const selector = [
-        `[data-field="${field}"]`,
-        source.dataset.tabIndex !== undefined ? `[data-tab-index="${source.dataset.tabIndex}"]` : "",
-        source.dataset.cardIndex !== undefined ? `[data-card-index="${source.dataset.cardIndex}"]` : "",
-        source.dataset.conditionIndex !== undefined
-          ? `[data-condition-index="${source.dataset.conditionIndex}"]`
-          : "",
-      ].join("")
-      this.shadowRoot.querySelectorAll(selector).forEach((input) => {
-        if (input !== source && "value" in input) input.value = value
-      })
+      if (form === "new-card") {
+        this._newCardType = asString(value.type, this._newCardType)
+      }
     }
 
     _applyCardJson(tabIndex, cardIndex, rawValue) {
@@ -2701,6 +2814,13 @@
 
     _hydrateHaControls() {
       if (!this.shadowRoot) return
+      this.shadowRoot.querySelectorAll("ha-form").forEach((form) => {
+        form.hass = this._hass
+        form.schema = this._formSchema(form.dataset.form)
+        form.data = this._formData(form.dataset.form, form)
+        form.computeLabel = this._computeFormLabel.bind(this)
+        form.computeHelper = this._computeFormHelper.bind(this)
+      })
       this.shadowRoot.querySelectorAll("ha-entity-picker, ha-icon-picker").forEach((picker) => {
         picker.hass = this._hass
         picker.value = picker.dataset.current || picker.value || ""
@@ -2709,6 +2829,41 @@
       this._nativeEditors.forEach((editor) => {
         editor.hass = this._hass
       })
+    }
+
+    _lovelaceConfig() {
+      const lovelace = this._lovelace || getLovelace()
+      return lovelace?.config || lovelace || { views: [] }
+    }
+
+    _mountCardPicker() {
+      if (!this.shadowRoot || !this._config) return
+      const host = this.shadowRoot.getElementById("native-card-picker-" + this._editingTabIndex)
+      if (!host) return
+      if (!customElements.get("hui-card-picker")) {
+        host.innerHTML =
+          '<div class="muted">Native Home Assistant card picker is not loaded in this editor session yet. Use the native card type selector below.</div>'
+        return
+      }
+
+      const picker = document.createElement("hui-card-picker")
+      picker.hass = this._hass
+      picker.lovelace = this._lovelaceConfig()
+      picker.suggestedCards = ["tile", "entities", "markdown", "button", "grid"]
+      picker.addEventListener("config-changed", (event) => {
+        event.stopPropagation()
+        const cardConfig = event.detail?.config
+        if (!isObject(cardConfig)) return
+        this._addPickedCard(Number(host.dataset.tabIndex), cardConfig)
+      })
+      host.replaceChildren(picker)
+    }
+
+    _addPickedCard(tabIndex, cardConfig) {
+      const tab = this._config.tabs[tabIndex]
+      if (!tab) return
+      tab.cards.push(clone(cardConfig))
+      this._emit(true)
     }
 
     async _mountNativeEditors() {
@@ -2773,6 +2928,32 @@
       return String(tabIndex) + "-" + String(cardIndex)
     }
   }
+
+  const CORE_CARD_OPTIONS = [
+    ["area", "Area"],
+    ["button", "Button"],
+    ["conditional", "Conditional"],
+    ["entities", "Entities"],
+    ["entity", "Entity"],
+    ["gauge", "Gauge"],
+    ["glance", "Glance"],
+    ["grid", "Grid"],
+    ["history-graph", "History graph"],
+    ["horizontal-stack", "Horizontal stack"],
+    ["iframe", "Webpage"],
+    ["logbook", "Logbook"],
+    ["markdown", "Markdown"],
+    ["media-control", "Media control"],
+    ["picture", "Picture"],
+    ["picture-elements", "Picture elements"],
+    ["picture-entity", "Picture entity"],
+    ["sensor", "Sensor"],
+    ["statistics-graph", "Statistics graph"],
+    ["thermostat", "Thermostat"],
+    ["tile", "Tile"],
+    ["vertical-stack", "Vertical stack"],
+    ["weather-forecast", "Weather forecast"],
+  ]
 
   class UltimateTabbedCard extends TabbedCard {}
   class UltimateTabbedCardEditor extends TabbedCardEditor {}
