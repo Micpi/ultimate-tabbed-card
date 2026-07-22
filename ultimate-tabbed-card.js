@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.3"
+  const VERSION = "0.3.4"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -59,19 +59,6 @@
     panel_padding: "10px",
     content_gap: "10px",
     min_height: "0px",
-  }
-
-  const CARD_TEMPLATES = {
-    entity: { type: "entity" },
-    entities: { type: "entities", entities: [] },
-    tile: { type: "tile" },
-    button: { type: "button", show_state: true },
-    markdown: { type: "markdown", content: "Content" },
-    thermostat: { type: "thermostat" },
-    gauge: { type: "gauge", min: 0, max: 40 },
-    glance: { type: "glance", entities: [] },
-    history: { type: "history-graph", entities: [] },
-    "history-graph": { type: "history-graph", entities: [] },
   }
 
   const STYLE_PRESETS = {
@@ -1666,12 +1653,10 @@
       this._editingTabIndex = 0
       this._nativeEditors = new Map()
       this._loadingEditors = new Set()
-      this._newCardType = "entity"
       this._nativeMountToken = 0
       this._renderPending = false
       this._lastEmittedConfigText = ""
       this._schemaCache = new Map()
-      this._schemaCacheSignature = ""
       this._pickerDefinitionWait = false
       this._boundComputeLabel = this._computeFormLabel.bind(this)
       this._boundComputeHelper = this._computeFormHelper.bind(this)
@@ -1909,15 +1894,6 @@
             max-height: min(70vh, 720px);
           }
 
-          .fallback-picker {
-            display: grid;
-            gap: 8px;
-          }
-
-          .card-picker-frame.has-native-picker .fallback-picker {
-            display: none;
-          }
-
           .advanced-json summary {
             cursor: pointer;
             color: var(--secondary-text-color);
@@ -2001,46 +1977,19 @@
       )}></ha-form>`
     }
 
-    _optionList(options) {
-      return options.map(([value, label]) => ({ value, label }))
-    }
-
-    _availableCardTypeOptions() {
-      const customOptions = (window.customCards || [])
-        .filter((card) => card?.type && ![CARD_TYPE, ALT_CARD_TYPE].includes(card.type))
-        .map((card) => ["custom:" + card.type, card.name || "custom:" + card.type])
-      return this._optionList([...CORE_CARD_OPTIONS, ...customOptions])
-    }
-
-    _cardTypeSignature() {
-      return (window.customCards || [])
-        .map((card) => card?.type || "")
-        .filter(Boolean)
-        .join("|")
-    }
-
     _cachedFormSchema(form) {
-      const signature = this._cardTypeSignature()
-      if (signature !== this._schemaCacheSignature) {
-        this._schemaCacheSignature = signature
-        this._schemaCache.clear()
-      }
       if (!this._schemaCache.has(form)) {
         this._schemaCache.set(form, this._formSchema(form))
       }
       return this._schemaCache.get(form)
     }
 
-    _createCardTemplate(type) {
-      const normalized = asString(type, "entity")
-      const template = CARD_TEMPLATES[normalized] || CARD_TEMPLATES[normalized.replace(/^custom:/, "")]
-      return template ? clone(template) : { type: normalized }
+    _optionList(options) {
+      return options.map(([value, label]) => ({ value, label }))
     }
 
     _formSchema(form) {
-      const cardTypeOptions = this._availableCardTypeOptions()
       const select = (options) => ({ select: { mode: "dropdown", options: this._optionList(options) } })
-      const cardSelect = { select: { mode: "dropdown", options: cardTypeOptions } }
       const cssText = { text: {} }
 
       switch (form) {
@@ -2254,23 +2203,6 @@
               ],
             },
           ]
-        case "card-basic":
-          return [
-            {
-              type: "grid",
-              name: "",
-              flatten: true,
-              column_min_width: "220px",
-              schema: [
-                { name: "type", selector: cardSelect },
-                { name: "entity", selector: { entity: {} } },
-                { name: "title", selector: { text: {} } },
-                { name: "content", selector: { text: { multiline: true } } },
-              ],
-            },
-          ]
-        case "new-card":
-          return [{ name: "type", selector: cardSelect }]
         default:
           return []
       }
@@ -2278,7 +2210,6 @@
 
     _formData(form, target) {
       const tabIndex = Number(target?.dataset?.tabIndex)
-      const cardIndex = Number(target?.dataset?.cardIndex)
       const conditionIndex = Number(target?.dataset?.conditionIndex)
       const tab = this._config.tabs[Number.isFinite(tabIndex) ? tabIndex : this._editingTabIndex]
 
@@ -2300,19 +2231,6 @@
           return { ...tab.badge }
         case "condition":
           return { ...(tab.conditions[conditionIndex] || {}) }
-        case "card-basic": {
-          const card = tab.cards[cardIndex] || {}
-          const firstEntity = Array.isArray(card.entities) ? card.entities[0] : ""
-          const entity = card.entity || (isObject(firstEntity) ? firstEntity.entity : firstEntity) || ""
-          return {
-            type: card.type || "entity",
-            entity,
-            title: card.title || card.name || "",
-            content: card.content || "",
-          }
-        }
-        case "new-card":
-          return { type: this._newCardType }
         default:
           return {}
       }
@@ -2372,15 +2290,12 @@
         state_not: "State not",
         text: "Text",
         template: "Template",
-        type: "Type",
         attribute: "Attribute",
         above: "Above",
         below: "Below",
         user: "User ids",
         user_not: "Excluded user ids",
         media_query: "Media query",
-        title: "Title",
-        content: "Markdown content",
       }
       return labels[schema.name]
     }
@@ -2391,8 +2306,6 @@
         maxCachedTabs: "0 keeps every opened tab cached.",
         hashPrefix: "Optional prefix used before tab ids in the URL hash.",
         template: "Home Assistant template returning true/text, depending on the field.",
-        type: "Pick from Home Assistant card types and installed custom cards.",
-        content: "Used by markdown cards.",
       }
       return helpers[schema.name]
     }
@@ -2527,12 +2440,6 @@
             }">
               <div class="muted">Home Assistant card picker is loading.</div>
             </div>
-            <div class="fallback-picker">
-              ${this._haForm("new-card", this._editingTabIndex)}
-              <ha-button appearance="filled" type="button" data-action="add-card" data-tab-index="${
-              this._editingTabIndex
-            }">Add selected card</ha-button>
-            </div>
           </div>
         </div>
       `
@@ -2557,7 +2464,6 @@
               this._editingTabIndex
             }" data-card-index="${index}" class="danger">Delete</ha-button>
           </div>
-          ${this._haForm("card-basic", this._editingTabIndex, index)}
           <div class="native-editor-host" id="native-editor-${key}">
             <div class="muted">Native visual editor loads here when this card type provides one.</div>
           </div>
@@ -2596,13 +2502,6 @@
       )
       const card = this._config.tabs[tabIndex]?.cards[cardIndex]
       if (textarea && card) textarea.value = JSON.stringify(card, null, 2)
-    }
-
-    _syncCardBasicForm(tabIndex, cardIndex) {
-      const form = this.shadowRoot.querySelector(
-        `ha-form[data-form="card-basic"][data-tab-index="${tabIndex}"][data-card-index="${cardIndex}"]`
-      )
-      if (form) form.data = this._formData("card-basic", form)
     }
 
     _renderAdvancedPanel() {
@@ -2733,12 +2632,6 @@
         return
       }
 
-      if (action === "add-card") {
-        this._config.tabs[tabIndex].cards.push(this._createCardTemplate(this._newCardType))
-        this._emit(true)
-        return
-      }
-
       if (action === "delete-card") {
         const cards = this._config.tabs[tabIndex].cards
         if (!cards || cardIndex < 0 || cardIndex >= cards.length) return
@@ -2775,22 +2668,8 @@
       return event.target?.closest?.(`[data-${key}]`) || null
     }
 
-    _setCardEntity(card, entity) {
-      const nextEntity = asString(entity, "").trim()
-      if (Array.isArray(card.entities)) {
-        card.entities = nextEntity ? [nextEntity] : []
-        return
-      }
-      if (nextEntity) {
-        card.entity = nextEntity
-      } else {
-        delete card.entity
-      }
-    }
-
     _applyFormData(form, value, target) {
       const tabIndex = Number(target?.dataset?.tabIndex)
-      const cardIndex = Number(target?.dataset?.cardIndex)
       const conditionIndex = Number(target?.dataset?.conditionIndex)
       const tab = this._config.tabs[Number.isFinite(tabIndex) ? tabIndex : this._editingTabIndex]
 
@@ -2859,47 +2738,6 @@
         return
       }
 
-      if (form === "card-basic") {
-        const card = tab.cards[cardIndex]
-        if (!card) return
-        const nextType = asString(value.type, card.type || "entity")
-        const typeChanged = nextType && nextType !== card.type
-        const nextEntity = asString(value.entity, "")
-        const nextTitle = asString(value.title, "")
-        const nextContent = asString(value.content, "")
-        if (typeChanged) {
-          const replacement = this._createCardTemplate(nextType)
-          this._setCardEntity(replacement, nextEntity)
-          if (nextTitle) replacement.title = nextTitle
-          if (nextType === "markdown" || "content" in replacement || nextContent) {
-            replacement.content = nextContent || replacement.content || ""
-          }
-          tab.cards[cardIndex] = replacement
-        } else {
-          card.type = nextType
-          this._setCardEntity(card, nextEntity)
-          if (nextTitle) {
-            card.title = nextTitle
-            if ("name" in card) card.name = nextTitle
-          } else {
-            delete card.title
-            if ("name" in card) delete card.name
-          }
-          if (nextType === "markdown" || "content" in card || nextContent) {
-            card.content = nextContent
-          } else {
-            delete card.content
-          }
-        }
-        this._refreshCardSummary(tabIndex, cardIndex)
-        this._syncCardJsonTextarea(tabIndex, cardIndex)
-        this._emit(typeChanged)
-        return
-      }
-
-      if (form === "new-card") {
-        this._newCardType = asString(value.type, this._newCardType)
-      }
     }
 
     _applyCardJson(tabIndex, cardIndex, rawValue) {
@@ -2989,11 +2827,9 @@
       if (!this.shadowRoot || !this._config) return
       const host = this.shadowRoot.getElementById("native-card-picker-" + this._editingTabIndex)
       if (!host) return
-      const frame = host.closest(".card-picker-frame")
       if (!customElements.get("hui-card-picker")) {
-        frame?.classList.remove("has-native-picker")
         host.innerHTML =
-          '<div class="muted">Native Home Assistant card picker is not loaded in this editor session yet. Use the native card type selector below.</div>'
+          '<div class="muted">Native Home Assistant card picker is not loaded in this editor session yet.</div>'
         if (!this._pickerDefinitionWait && typeof customElements.whenDefined === "function") {
           this._pickerDefinitionWait = true
           customElements.whenDefined("hui-card-picker").then(() => {
@@ -3004,7 +2840,6 @@
         return
       }
 
-      frame?.classList.add("has-native-picker")
       const existingPicker = host.querySelector("hui-card-picker")
       const picker = existingPicker || document.createElement("hui-card-picker")
       picker.hass = this._hass
@@ -3087,7 +2922,6 @@
           if (!isObject(nextConfig)) return
           this._config.tabs[tabIndex].cards[cardIndex] = clone(nextConfig)
           this._refreshCardSummary(tabIndex, cardIndex)
-          this._syncCardBasicForm(tabIndex, cardIndex)
           this._syncCardJsonTextarea(tabIndex, cardIndex)
           this._emit(false)
         })
@@ -3101,32 +2935,6 @@
       return String(tabIndex) + "-" + String(cardIndex)
     }
   }
-
-  const CORE_CARD_OPTIONS = [
-    ["area", "Area"],
-    ["button", "Button"],
-    ["conditional", "Conditional"],
-    ["entities", "Entities"],
-    ["entity", "Entity"],
-    ["gauge", "Gauge"],
-    ["glance", "Glance"],
-    ["grid", "Grid"],
-    ["history-graph", "History graph"],
-    ["horizontal-stack", "Horizontal stack"],
-    ["iframe", "Webpage"],
-    ["logbook", "Logbook"],
-    ["markdown", "Markdown"],
-    ["media-control", "Media control"],
-    ["picture", "Picture"],
-    ["picture-elements", "Picture elements"],
-    ["picture-entity", "Picture entity"],
-    ["sensor", "Sensor"],
-    ["statistics-graph", "Statistics graph"],
-    ["thermostat", "Thermostat"],
-    ["tile", "Tile"],
-    ["vertical-stack", "Vertical stack"],
-    ["weather-forecast", "Weather forecast"],
-  ]
 
   class UltimateTabbedCard extends TabbedCard {}
   class UltimateTabbedCardEditor extends TabbedCardEditor {}
