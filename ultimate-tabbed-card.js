@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.5"
+  const VERSION = "0.3.6"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -170,9 +170,13 @@
     return firstKey || Object.values(areas)[0]?.area_id || ""
   }
 
-  function normalizeChildCardConfig(card, hass) {
+  function normalizeChildCardConfig(card, hass, fallbackType = "") {
     const next = clone(card)
-    if (next?.type === "area") {
+    if (!isObject(next)) return next
+    if (!next.type) {
+      next.type = fallbackType || (next.area || next.area_id ? "area" : "")
+    }
+    if (next.type === "area") {
       if (!next.area && next.area_id) next.area = next.area_id
       delete next.area_id
       if (!next.area) next.area = getFirstAreaId(hass)
@@ -222,6 +226,9 @@
     }
     if (isObject(tab?.card)) {
       return [normalizeChildCardConfig(tab.card)]
+    }
+    if (tab?.area || tab?.area_id) {
+      return [normalizeChildCardConfig({ type: "area", area: tab.area, area_id: tab.area_id })]
     }
     return []
   }
@@ -3064,7 +3071,13 @@
           event.stopPropagation()
           const nextConfig = event.detail?.config
           if (!isObject(nextConfig)) return
-          this._config.tabs[tabIndex].cards[cardIndex] = normalizeChildCardConfig(nextConfig, this._hass)
+          const currentCard = this._config.tabs[tabIndex]?.cards[cardIndex] || {}
+          const fallbackType = currentCard.type || card.type || ""
+          this._config.tabs[tabIndex].cards[cardIndex] = normalizeChildCardConfig(
+            nextConfig,
+            this._hass,
+            fallbackType
+          )
           this._refreshCardSummary(tabIndex, cardIndex)
           this._syncCardJsonTextarea(tabIndex, cardIndex)
           this._emit(false)
