@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.6"
+  const VERSION = "0.3.7"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -45,6 +45,7 @@
     bar_background: "transparent",
     text_color: "var(--primary-text-color)",
     active_color: "var(--primary-color)",
+    active_border_color: "color-mix(in srgb, var(--primary-color) 50%, transparent)",
     active_text_color: "var(--text-primary-color, #fff)",
     inactive_color: "var(--secondary-text-color)",
     hover_color: "rgba(127, 127, 127, 0.12)",
@@ -55,6 +56,12 @@
     tab_radius: "10px",
     tab_gap: "6px",
     tab_padding: "9px 12px",
+    tab_min_width: "0px",
+    tab_font_size: "0.9rem",
+    tab_font_weight: "500",
+    tab_text_transform: "none",
+    tab_border_width: "1px",
+    tab_icon_size: "19px",
     header_padding: "8px",
     panel_padding: "10px",
     content_gap: "10px",
@@ -67,36 +74,140 @@
       density: "comfortable",
       tab_radius: "0px",
       tab_padding: "12px 16px",
+      tab_gap: "2px",
+      tab_font_weight: "600",
+      tab_text_transform: "none",
+      tab_border_width: "0px",
       bar_background: "transparent",
+      active_color: "var(--primary-color)",
+      active_border_color: "var(--primary-color)",
+      active_text_color: "var(--primary-color)",
+      hover_color: "rgba(127, 127, 127, 0.12)",
+      border_color: "var(--divider-color)",
       background_color: "var(--ha-card-background, var(--card-background-color, #fff))",
+      shadow: "var(--ha-card-box-shadow, none)",
     },
     pills: {
       variant: "pills",
       density: "comfortable",
       tab_radius: "999px",
       tab_padding: "9px 14px",
+      tab_gap: "6px",
+      tab_font_weight: "600",
+      tab_text_transform: "none",
+      tab_border_width: "1px",
       bar_background: "transparent",
+      active_color: "var(--primary-color)",
+      active_border_color: "color-mix(in srgb, var(--primary-color) 50%, transparent)",
+      active_text_color: "var(--text-primary-color, #fff)",
+      hover_color: "rgba(127, 127, 127, 0.12)",
+      border_color: "var(--divider-color)",
       background_color: "var(--ha-card-background, var(--card-background-color, #fff))",
+      shadow: "var(--ha-card-box-shadow, none)",
     },
     segmented: {
       variant: "segmented",
       density: "compact",
       tab_radius: "8px",
       tab_padding: "8px 12px",
+      tab_gap: "0px",
+      tab_font_weight: "600",
+      tab_text_transform: "none",
+      tab_border_width: "1px",
       bar_background: "rgba(127, 127, 127, 0.10)",
+      active_color: "var(--primary-color)",
+      active_border_color: "color-mix(in srgb, var(--primary-color) 50%, transparent)",
+      active_text_color: "var(--text-primary-color, #fff)",
+      hover_color: "rgba(127, 127, 127, 0.12)",
+      border_color: "var(--divider-color)",
       background_color: "var(--ha-card-background, var(--card-background-color, #fff))",
+      shadow: "var(--ha-card-box-shadow, none)",
     },
     minimal: {
       variant: "minimal",
       density: "compact",
       tab_radius: "8px",
       tab_padding: "7px 10px",
+      tab_gap: "4px",
+      tab_font_weight: "500",
+      tab_text_transform: "none",
+      tab_border_width: "0px",
       bar_background: "transparent",
+      active_color: "var(--primary-color)",
+      active_border_color: "var(--primary-color)",
+      active_text_color: "var(--primary-color)",
+      hover_color: "rgba(127, 127, 127, 0.12)",
       background_color: "transparent",
       border_color: "transparent",
       shadow: "none",
     },
+    outline: {
+      variant: "pills",
+      density: "comfortable",
+      tab_radius: "8px",
+      tab_padding: "8px 12px",
+      tab_gap: "8px",
+      tab_font_weight: "600",
+      tab_text_transform: "none",
+      tab_border_width: "1px",
+      active_text_color: "var(--primary-color)",
+      bar_background: "transparent",
+      active_color: "transparent",
+      active_border_color: "var(--primary-color)",
+      hover_color: "rgba(127, 127, 127, 0.10)",
+      border_color: "var(--primary-color)",
+      background_color: "var(--ha-card-background, var(--card-background-color, #fff))",
+      shadow: "var(--ha-card-box-shadow, none)",
+    },
+    compact: {
+      variant: "segmented",
+      density: "compact",
+      tab_radius: "6px",
+      tab_padding: "6px 9px",
+      tab_gap: "0px",
+      tab_font_size: "0.82rem",
+      tab_font_weight: "600",
+      tab_text_transform: "none",
+      tab_border_width: "1px",
+      bar_background: "rgba(127, 127, 127, 0.10)",
+      active_color: "var(--primary-color)",
+      active_border_color: "color-mix(in srgb, var(--primary-color) 50%, transparent)",
+      active_text_color: "var(--text-primary-color, #fff)",
+      hover_color: "rgba(127, 127, 127, 0.12)",
+      border_color: "var(--divider-color)",
+      background_color: "var(--ha-card-background, var(--card-background-color, #fff))",
+      shadow: "var(--ha-card-box-shadow, none)",
+    },
+    glass: {
+      variant: "pills",
+      density: "comfortable",
+      tab_radius: "14px",
+      tab_padding: "10px 14px",
+      tab_gap: "8px",
+      tab_font_weight: "600",
+      tab_border_width: "1px",
+      bar_background: "rgba(127, 127, 127, 0.08)",
+      active_color: "color-mix(in srgb, var(--primary-color) 82%, transparent)",
+      active_border_color: "color-mix(in srgb, var(--primary-color) 45%, transparent)",
+      active_text_color: "var(--text-primary-color, #fff)",
+      hover_color: "rgba(127, 127, 127, 0.16)",
+      border_color: "color-mix(in srgb, var(--primary-color) 28%, var(--divider-color))",
+      background_color: "var(--ha-card-background, var(--card-background-color, #fff))",
+      shadow: "var(--ha-card-box-shadow, none)",
+    },
   }
+
+  const STYLE_PRESET_OPTIONS = [
+    ["material", "Material"],
+    ["pills", "Pills"],
+    ["segmented", "Segmented"],
+    ["minimal", "Minimal"],
+    ["outline", "Outline"],
+    ["compact", "Compact"],
+    ["glass", "Glass"],
+  ]
+
+  const CARD_CLIPBOARD_KEY = "ultimate-tabbed-card:card-clipboard"
 
   let instanceCounter = 0
 
@@ -153,6 +264,21 @@
         composed: true,
       })
     )
+  }
+
+  function dispatchHaptic(el, type = "selection") {
+    el.dispatchEvent(
+      new CustomEvent("haptic", {
+        detail: type,
+        bubbles: true,
+        composed: true,
+      })
+    )
+    if (navigator.vibrate) {
+      try {
+        navigator.vibrate(type === "heavy" ? 18 : type === "medium" ? 12 : 8)
+      } catch (_) {}
+    }
   }
 
   function serializeConfig(config) {
@@ -420,6 +546,10 @@
         stylesSource.button_active_background ||
         stylesSource["--mdc-theme-primary"] ||
         DEFAULT_STYLES.active_color,
+      active_border_color:
+        stylesSource.active_border_color ||
+        stylesSource.activeBorderColor ||
+        DEFAULT_STYLES.active_border_color,
       active_text_color:
         stylesSource.active_text_color ||
         stylesSource.button_active_text_color ||
@@ -438,6 +568,18 @@
       tab_radius: stylesSource.tab_radius || stylesSource.button_border_radius || DEFAULT_STYLES.tab_radius,
       tab_gap: stylesSource.tab_gap || stylesSource.tabs_gap || DEFAULT_STYLES.tab_gap,
       tab_padding: stylesSource.tab_padding || stylesSource.button_padding || DEFAULT_STYLES.tab_padding,
+      tab_min_width: stylesSource.tab_min_width || stylesSource.tabMinWidth || DEFAULT_STYLES.tab_min_width,
+      tab_font_size: stylesSource.tab_font_size || stylesSource.tabFontSize || DEFAULT_STYLES.tab_font_size,
+      tab_font_weight:
+        stylesSource.tab_font_weight || stylesSource.tabFontWeight || DEFAULT_STYLES.tab_font_weight,
+      tab_text_transform: enumValue(
+        stylesSource.tab_text_transform || stylesSource.tabTextTransform || DEFAULT_STYLES.tab_text_transform,
+        ["none", "uppercase", "lowercase", "capitalize"],
+        DEFAULT_STYLES.tab_text_transform
+      ),
+      tab_border_width:
+        stylesSource.tab_border_width || stylesSource.tabBorderWidth || DEFAULT_STYLES.tab_border_width,
+      tab_icon_size: stylesSource.tab_icon_size || stylesSource.tabIconSize || DEFAULT_STYLES.tab_icon_size,
       header_padding: stylesSource.header_padding || stylesSource.bar_padding || DEFAULT_STYLES.header_padding,
       panel_padding: stylesSource.panel_padding || stylesSource.card_padding || DEFAULT_STYLES.panel_padding,
       content_gap: stylesSource.content_gap || DEFAULT_STYLES.content_gap,
@@ -871,17 +1013,19 @@
           .tab-btn {
             appearance: none;
             position: relative;
-            border: 1px solid transparent;
+            border: var(--utc-tab-border-width) solid transparent;
             border-radius: var(--utc-tab-radius);
             background: transparent;
             color: var(--utc-inactive);
             font: inherit;
-            font-size: 0.9rem;
+            font-size: var(--utc-tab-font-size);
+            font-weight: var(--utc-tab-font-weight);
             line-height: 1;
-            min-width: 0;
+            min-width: var(--utc-tab-min-width);
             max-width: 100%;
             white-space: nowrap;
             padding: var(--utc-tab-padding);
+            text-transform: var(--utc-tab-text-transform);
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -923,7 +1067,7 @@
           .card.variant-pills .tab-btn.active,
           .card.variant-segmented .tab-btn.active {
             color: var(--utc-active-text);
-            border-color: color-mix(in srgb, var(--utc-active) 50%, transparent);
+            border-color: var(--utc-active-border);
             background: var(--utc-active);
           }
 
@@ -962,8 +1106,8 @@
           }
 
           .tab-icon {
-            width: 19px;
-            height: 19px;
+            width: var(--utc-tab-icon-size);
+            height: var(--utc-tab-icon-size);
             flex: 0 0 auto;
           }
 
@@ -1120,6 +1264,7 @@
       card.style.setProperty("--utc-bar-background", styles.bar_background)
       card.style.setProperty("--utc-text", styles.text_color)
       card.style.setProperty("--utc-active", styles.active_color)
+      card.style.setProperty("--utc-active-border", styles.active_border_color)
       card.style.setProperty("--utc-active-text", styles.active_text_color)
       card.style.setProperty("--utc-inactive", styles.inactive_color)
       card.style.setProperty("--utc-hover", styles.hover_color)
@@ -1130,6 +1275,12 @@
       card.style.setProperty("--utc-tab-radius", styles.tab_radius)
       card.style.setProperty("--utc-tab-gap", styles.tab_gap)
       card.style.setProperty("--utc-tab-padding", styles.tab_padding)
+      card.style.setProperty("--utc-tab-min-width", styles.tab_min_width)
+      card.style.setProperty("--utc-tab-font-size", styles.tab_font_size)
+      card.style.setProperty("--utc-tab-font-weight", styles.tab_font_weight)
+      card.style.setProperty("--utc-tab-text-transform", styles.tab_text_transform)
+      card.style.setProperty("--utc-tab-border-width", styles.tab_border_width)
+      card.style.setProperty("--utc-tab-icon-size", styles.tab_icon_size)
       card.style.setProperty("--utc-header-padding", styles.header_padding)
       card.style.setProperty("--utc-panel-padding", styles.panel_padding)
       card.style.setProperty("--utc-content-gap", styles.content_gap)
@@ -1469,11 +1620,9 @@
       })
     }
 
-    _haptic() {
-      if (!this._config.options.haptic || !navigator.vibrate) return
-      try {
-        navigator.vibrate(8)
-      } catch (_) {}
+    _haptic(type = "selection") {
+      if (!this._config.options.haptic) return
+      dispatchHaptic(this, type)
     }
 
     _onPanelTouchStart(event) {
@@ -1679,6 +1828,7 @@
       this._loadingEditors = new Set()
       this._expandedEditorKeys = new Set()
       this._openPickerTabs = new Set()
+      this._cardClipboard = null
       this._nativeMountToken = 0
       this._renderPending = false
       this._lastEmittedConfigText = ""
@@ -1842,6 +1992,55 @@
             gap: 8px;
             flex-wrap: wrap;
             align-items: center;
+          }
+
+          .preset-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+            gap: 8px;
+          }
+
+          .preset-button {
+            appearance: none;
+            border: 1px solid var(--divider-color);
+            border-radius: 8px;
+            padding: 9px;
+            background: var(--card-background-color, #fff);
+            color: var(--primary-text-color);
+            display: grid;
+            gap: 7px;
+            cursor: pointer;
+            font: inherit;
+            text-align: start;
+          }
+
+          .preset-button.active {
+            border-color: var(--primary-color);
+            box-shadow: inset 0 0 0 1px var(--primary-color);
+          }
+
+          .preset-preview {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            min-width: 0;
+          }
+
+          .preset-pill {
+            height: 14px;
+            flex: 1 1 0;
+            min-width: 18px;
+            border-radius: 999px;
+            background: rgba(127, 127, 127, 0.18);
+          }
+
+          .preset-pill.active {
+            background: var(--primary-color);
+          }
+
+          .preset-name {
+            font-weight: 700;
+            font-size: 0.82rem;
           }
 
           .tab-chip {
@@ -2131,10 +2330,37 @@
                 { name: "bar_background", selector: cssText },
                 { name: "text_color", selector: cssText },
                 { name: "active_color", selector: cssText },
+                { name: "active_border_color", selector: cssText },
                 { name: "active_text_color", selector: cssText },
                 { name: "inactive_color", selector: cssText },
+                { name: "hover_color", selector: cssText },
                 { name: "border_color", selector: cssText },
                 { name: "badge_color", selector: cssText },
+              ],
+            },
+          ]
+        case "appearance-tabs":
+          return [
+            {
+              type: "grid",
+              name: "",
+              flatten: true,
+              column_min_width: "180px",
+              schema: [
+                { name: "tab_min_width", selector: cssText },
+                { name: "tab_font_size", selector: cssText },
+                { name: "tab_font_weight", selector: cssText },
+                {
+                  name: "tab_text_transform",
+                  selector: select([
+                    ["none", "None"],
+                    ["uppercase", "Uppercase"],
+                    ["lowercase", "Lowercase"],
+                    ["capitalize", "Capitalize"],
+                  ]),
+                },
+                { name: "tab_border_width", selector: cssText },
+                { name: "tab_icon_size", selector: cssText },
               ],
             },
           ]
@@ -2295,14 +2521,22 @@
         bar_background: "Tab bar background",
         text_color: "Text color",
         active_color: "Active color",
+        active_border_color: "Active border",
         active_text_color: "Active text color",
         inactive_color: "Inactive color",
+        hover_color: "Hover color",
         border_color: "Border color",
         badge_color: "Badge color",
         radius: "Card radius",
         tab_radius: "Tab radius",
         shadow: "Shadow",
         tab_padding: "Tab padding",
+        tab_min_width: "Tab minimum width",
+        tab_font_size: "Tab font size",
+        tab_font_weight: "Tab font weight",
+        tab_text_transform: "Tab text transform",
+        tab_border_width: "Tab border width",
+        tab_icon_size: "Tab icon size",
         header_padding: "Header padding",
         panel_padding: "Panel padding",
         tab_gap: "Tab gap",
@@ -2353,16 +2587,17 @@
       return `
         <div class="section">
           <div class="section-title">Presets</div>
-          <div class="toolbar">
-            <ha-button appearance="outlined" type="button" data-action="preset" data-preset="material">Material</ha-button>
-            <ha-button appearance="outlined" type="button" data-action="preset" data-preset="pills">Pills</ha-button>
-            <ha-button appearance="outlined" type="button" data-action="preset" data-preset="segmented">Segmented</ha-button>
-            <ha-button appearance="outlined" type="button" data-action="preset" data-preset="minimal">Minimal</ha-button>
-          </div>
+          <div class="preset-grid">${STYLE_PRESET_OPTIONS.map(([key, label]) =>
+            this._renderPresetButton(key, label)
+          ).join("")}</div>
         </div>
         <div class="section">
           <div class="section-title">Layout</div>
           ${this._haForm("appearance-layout")}
+        </div>
+        <div class="section">
+          <div class="section-title">Tabs</div>
+          ${this._haForm("appearance-tabs")}
         </div>
         <div class="section">
           <div class="section-title">Colors</div>
@@ -2373,6 +2608,28 @@
           ${this._haForm("appearance-spacing")}
         </div>
       `
+    }
+
+    _renderPresetButton(key, label) {
+      const active = this._isPresetActive(key)
+      return `
+        <button type="button" class="preset-button ${active ? "active" : ""}" data-action="preset" data-preset="${key}">
+          <span class="preset-preview" aria-hidden="true">
+            <span class="preset-pill active"></span>
+            <span class="preset-pill"></span>
+            <span class="preset-pill"></span>
+          </span>
+          <span class="preset-name">${escapeHtml(label)}</span>
+        </button>
+      `
+    }
+
+    _isPresetActive(key) {
+      const preset = STYLE_PRESETS[key]
+      if (!preset) return false
+      return Object.entries(preset).every(([name, value]) => {
+        return String(this._config.styles[name] ?? "") === String(value)
+      })
     }
 
     _renderTabsPanel() {
@@ -2460,9 +2717,15 @@
         .map((card, index) => this._renderCardItem(card, index))
         .join("")
       const pickerOpen = !tab.cards.length || this._openPickerTabs.has(this._editingTabIndex)
+      const hasClipboard = Boolean(this._readCardClipboard())
       return `
         <div class="section">
           <div class="section-title">Cards in this tab</div>
+          <div class="toolbar">
+            <ha-button appearance="outlined" type="button" data-action="paste-card" data-tab-index="${
+              this._editingTabIndex
+            }" ${hasClipboard ? "" : "disabled"}>Paste card</ha-button>
+          </div>
           ${cards}
           <div class="card-picker-frame">
             <details class="card-picker-details" data-tab-index="${this._editingTabIndex}" ${
@@ -2496,6 +2759,9 @@
             <ha-button appearance="outlined" type="button" data-action="duplicate-card" data-tab-index="${
               this._editingTabIndex
             }" data-card-index="${index}">Duplicate</ha-button>
+            <ha-button appearance="outlined" type="button" data-action="copy-card" data-tab-index="${
+              this._editingTabIndex
+            }" data-card-index="${index}">Copy</ha-button>
             <ha-button appearance="outlined" type="button" data-action="delete-card" data-tab-index="${
               this._editingTabIndex
             }" data-card-index="${index}" class="danger">Delete</ha-button>
@@ -2543,6 +2809,36 @@
       )
       const card = this._config.tabs[tabIndex]?.cards[cardIndex]
       if (textarea && card) textarea.value = JSON.stringify(card, null, 2)
+    }
+
+    _readCardClipboard() {
+      if (isObject(this._cardClipboard)) return clone(this._cardClipboard)
+      if (isObject(window.__ultimateTabbedCardClipboard)) {
+        this._cardClipboard = clone(window.__ultimateTabbedCardClipboard)
+        return clone(this._cardClipboard)
+      }
+      try {
+        const stored = window.localStorage.getItem(CARD_CLIPBOARD_KEY)
+        if (!stored) return null
+        const parsed = JSON.parse(stored)
+        if (!isObject(parsed) || !parsed.type) return null
+        this._cardClipboard = parsed
+        window.__ultimateTabbedCardClipboard = clone(parsed)
+        return clone(parsed)
+      } catch (_) {
+        return null
+      }
+    }
+
+    _writeCardClipboard(card) {
+      if (!isObject(card) || !card.type) return false
+      const copy = clone(card)
+      this._cardClipboard = copy
+      window.__ultimateTabbedCardClipboard = clone(copy)
+      try {
+        window.localStorage.setItem(CARD_CLIPBOARD_KEY, JSON.stringify(copy))
+      } catch (_) {}
+      return true
     }
 
     _clearMountedCardEditors(tabIndex) {
@@ -2701,6 +2997,27 @@
 
       if (action === "delete-condition") {
         this._config.tabs[tabIndex].conditions.splice(conditionIndex, 1)
+        this._emit(true)
+        return
+      }
+
+      if (action === "copy-card") {
+        const card = this._config.tabs[tabIndex]?.cards?.[cardIndex]
+        if (!this._writeCardClipboard(card)) return
+        this._haptic("selection")
+        this._scheduleRender()
+        return
+      }
+
+      if (action === "paste-card") {
+        const tab = this._config.tabs[tabIndex]
+        const card = this._readCardClipboard()
+        if (!tab || !card) return
+        const nextCard = normalizeChildCardConfig(card, this._hass)
+        const nextIndex = tab.cards.length
+        tab.cards.push(nextCard)
+        this._expandedEditorKeys.add(this._nativeKey(tabIndex, nextIndex))
+        this._haptic("light")
         this._emit(true)
         return
       }
