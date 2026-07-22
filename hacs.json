@@ -1,8 +1,8 @@
 {
   "name": "Ultimate Tabbed Card",
-  "content_in_root": false,
+  "content_in_root": true,
   "filename": "ultimate-tabbed-card.js",
   "render_readme": true,
   "homeassistant": "2024.1.0",
-  "version": "0.1.3"
+  "version": "0.3.0"
 }

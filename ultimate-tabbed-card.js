@@ -1,28 +1,160 @@
 ;(function () {
+  "use strict"
+
+  const VERSION = "0.3.0"
   const CARD_TYPE = "tabbed-card"
+  const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
+  const ALT_CARD_EDITOR_TYPE = "ultimate-tabbed-card-editor"
 
   const DEFAULT_OPTIONS = {
     defaultTabIndex: 0,
+    defaultTabId: "",
     keepAlive: true,
     lazy: true,
+    preload: "active",
+    maxCachedTabs: 0,
     showIcons: true,
     showLabels: true,
+    hideInactiveLabels: false,
+    remember: "none",
+    storageKey: "",
+    deepLink: true,
+    updateHash: false,
+    hashPrefix: "",
+    swipe: true,
+    swipeThreshold: 48,
+    haptic: false,
+    animate: true,
+    keyboardNavigation: true,
+    autoSelectFirstVisible: true,
+    scrollActiveIntoView: true,
+    ariaLabel: "Tabbed card",
   }
 
   const DEFAULT_STYLES = {
-    background_color: "var(--card-background-color, #1F2937)",
-    text_color: "var(--primary-text-color, #F9FAFB)",
-    active_color: "var(--primary-color, #00AEEF)",
-    inactive_color: "var(--secondary-text-color, #9CA3AF)",
-    border_color: "rgba(255, 255, 255, 0.10)",
+    tab_position: "top",
+    alignment: "start",
+    variant: "pills",
+    density: "comfortable",
+    icon_position: "inline",
+    equal_width: false,
+    wrap_tabs: false,
+    background_color: "var(--ha-card-background, var(--card-background-color, #fff))",
+    panel_background: "transparent",
+    bar_background: "transparent",
+    text_color: "var(--primary-text-color)",
+    active_color: "var(--primary-color)",
+    active_text_color: "var(--text-primary-color, #fff)",
+    inactive_color: "var(--secondary-text-color)",
+    hover_color: "rgba(127, 127, 127, 0.12)",
+    border_color: "var(--divider-color)",
+    badge_color: "var(--error-color)",
+    shadow: "var(--ha-card-box-shadow, none)",
+    radius: "var(--ha-card-border-radius, 12px)",
+    tab_radius: "10px",
+    tab_gap: "6px",
+    tab_padding: "9px 12px",
+    header_padding: "8px",
+    panel_padding: "10px",
+    content_gap: "10px",
+    min_height: "0px",
   }
 
+  const CARD_TEMPLATES = {
+    entity: { type: "entity", entity: "sun.sun" },
+    entities: { type: "entities", entities: ["sun.sun"] },
+    tile: { type: "tile", entity: "sun.sun" },
+    button: { type: "button", entity: "sun.sun", show_state: true },
+    markdown: { type: "markdown", content: "Content" },
+    thermostat: { type: "thermostat", entity: "climate.home" },
+    gauge: { type: "gauge", entity: "sensor.home_temperature", min: 0, max: 40 },
+    glance: { type: "glance", entities: ["sun.sun"] },
+    history: { type: "history-graph", entities: ["sun.sun"] },
+  }
+
+  const STYLE_PRESETS = {
+    material: {
+      variant: "underline",
+      density: "comfortable",
+      tab_radius: "0px",
+      tab_padding: "12px 16px",
+      bar_background: "transparent",
+      background_color: "var(--ha-card-background, var(--card-background-color, #fff))",
+    },
+    pills: {
+      variant: "pills",
+      density: "comfortable",
+      tab_radius: "999px",
+      tab_padding: "9px 14px",
+      bar_background: "transparent",
+      background_color: "var(--ha-card-background, var(--card-background-color, #fff))",
+    },
+    segmented: {
+      variant: "segmented",
+      density: "compact",
+      tab_radius: "8px",
+      tab_padding: "8px 12px",
+      bar_background: "rgba(127, 127, 127, 0.10)",
+      background_color: "var(--ha-card-background, var(--card-background-color, #fff))",
+    },
+    minimal: {
+      variant: "minimal",
+      density: "compact",
+      tab_radius: "8px",
+      tab_padding: "7px 10px",
+      bar_background: "transparent",
+      background_color: "transparent",
+      border_color: "transparent",
+      shadow: "none",
+    },
+  }
+
+  let instanceCounter = 0
+
   function clone(value) {
+    if (value === undefined) return undefined
     if (typeof structuredClone === "function") {
       return structuredClone(value)
     }
     return JSON.parse(JSON.stringify(value))
+  }
+
+  function isObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+  }
+
+  function toNumber(value, fallback = 0) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : fallback
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value))
+  }
+
+  function asBool(value, fallback = false) {
+    if (typeof value === "boolean") return value
+    if (typeof value === "number") return value !== 0
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase()
+      if (["true", "yes", "on", "1"].includes(normalized)) return true
+      if (["false", "no", "off", "0"].includes(normalized)) return false
+    }
+    return fallback
+  }
+
+  function asString(value, fallback = "") {
+    if (value === undefined || value === null) return fallback
+    return String(value)
+  }
+
+  function enumValue(value, allowed, fallback) {
+    return allowed.includes(value) ? value : fallback
+  }
+
+  function safeArray(value) {
+    return Array.isArray(value) ? value : []
   }
 
   function dispatchConfigChanged(el, config) {
@@ -35,85 +167,393 @@
     )
   }
 
-  function toNumber(value, fallback = 0) {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : fallback
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;")
   }
 
-  function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value))
+  function safeColor(value, fallback) {
+    if (typeof value !== "string") return fallback
+    const normalized = value.trim()
+    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(normalized)) {
+      if (normalized.length === 4) {
+        return (
+          "#" +
+          normalized[1] +
+          normalized[1] +
+          normalized[2] +
+          normalized[2] +
+          normalized[3] +
+          normalized[3]
+        )
+      }
+      return normalized
+    }
+    return fallback
+  }
+
+  function slugify(value, fallback) {
+    const text = asString(value, "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+    return text || fallback
   }
 
   function resolveTabLabel(tab, index) {
-    return tab?.title || tab?.attributes?.label || tab?.label || "Tab " + String(index + 1)
+    return (
+      tab?.title ||
+      tab?.attributes?.label ||
+      tab?.label ||
+      tab?.name ||
+      "Tab " + String(index + 1)
+    )
   }
 
   function resolveTabIcon(tab) {
     return tab?.icon || tab?.attributes?.icon || ""
   }
 
+  function resolveTabId(tab, label, index) {
+    return tab?.id || tab?.attributes?.id || slugify(label, "tab-" + String(index + 1))
+  }
+
+  function normalizeCards(tab) {
+    if (Array.isArray(tab?.cards) && tab.cards.length) {
+      return tab.cards.filter(isObject).map((card) => clone(card))
+    }
+    if (isObject(tab?.card)) {
+      return [clone(tab.card)]
+    }
+    return []
+  }
+
+  function normalizeBadge(tab) {
+    const source = isObject(tab?.badge) ? tab.badge : {}
+    const legacyBadge = !isObject(tab?.badge) ? tab?.badge : undefined
+    return {
+      mode: enumValue(
+        source.mode || tab?.badge_display || tab?.badgeMode || "dot",
+        ["none", "dot", "count", "text", "exclamation", "state"],
+        "dot"
+      ),
+      entity: asString(source.entity || tab?.badge_entity || "", ""),
+      state: asString(source.state || tab?.badge_state || "", ""),
+      text: asString(source.text || legacyBadge || "", ""),
+      template: asString(source.template || tab?.badge_template || "", ""),
+    }
+  }
+
+  function normalizeCondition(condition) {
+    if (!isObject(condition)) return null
+    if (condition.entity) {
+      return {
+        type: "entity",
+        entity: asString(condition.entity, ""),
+        attribute: asString(condition.attribute, ""),
+        state: asString(condition.state ?? "", ""),
+        state_not: asString(condition.state_not ?? condition.not_state ?? "", ""),
+        above: condition.above ?? "",
+        below: condition.below ?? "",
+        exists: condition.exists,
+      }
+    }
+    if (condition.user || condition.user_not) {
+      return {
+        type: "user",
+        user: Array.isArray(condition.user) ? condition.user.join(",") : asString(condition.user, ""),
+        user_not: Array.isArray(condition.user_not)
+          ? condition.user_not.join(",")
+          : asString(condition.user_not, ""),
+      }
+    }
+    if (condition.media_query || condition.mediaQuery) {
+      return {
+        type: "media",
+        media_query: asString(condition.media_query || condition.mediaQuery, ""),
+      }
+    }
+    if (condition.template) {
+      return { type: "template", template: asString(condition.template, "") }
+    }
+    return null
+  }
+
+  function normalizeTab(tab, index) {
+    const label = asString(resolveTabLabel(tab, index), "Tab " + String(index + 1))
+    const cards = normalizeCards(tab)
+    if (!cards.length) {
+      throw new Error("Tabbed Card: each tab must contain a card or cards configuration.")
+    }
+
+    const attr = tab?.attributes || {}
+    const styles = isObject(tab?.styles) ? clone(tab.styles) : {}
+
+    return {
+      attributes: {
+        label,
+        icon: asString(resolveTabIcon(tab), ""),
+        id: asString(resolveTabId(tab, label, index), "tab-" + String(index + 1)),
+        hidden: asBool(attr.hidden ?? tab?.hidden, false),
+        disabled: asBool(attr.disabled ?? tab?.disabled, false),
+      },
+      badge: normalizeBadge(tab),
+      conditions: safeArray(tab?.conditions || attr.conditions).map(normalizeCondition).filter(Boolean),
+      cards,
+      styles,
+    }
+  }
+
   function normalizeConfig(inputConfig) {
     const source = inputConfig || {}
-    const tabs = Array.isArray(source.tabs) ? source.tabs : []
+    const tabs = safeArray(source.tabs)
 
     if (!tabs.length) {
       throw new Error("Tabbed Card: at least one tab is required.")
     }
 
     const optionsSource = source.options || {}
+    const legacyDefaultTab =
+      source.default_tab !== undefined ? toNumber(source.default_tab, 1) - 1 : undefined
+    const defaultTabIndex = toNumber(
+      optionsSource.defaultTabIndex ??
+        optionsSource.default_tab_index ??
+        source.defaultTabIndex ??
+        legacyDefaultTab,
+      DEFAULT_OPTIONS.defaultTabIndex
+    )
+    const rememberSource =
+      optionsSource.remember ?? optionsSource.rememberTab ?? optionsSource.remember_tab ?? "none"
+    const rememberMode =
+      rememberSource === true ? "card" : rememberSource === false ? "none" : asString(rememberSource, "none")
+
     const options = {
       ...DEFAULT_OPTIONS,
-      defaultTabIndex: toNumber(
-        optionsSource.defaultTabIndex ?? optionsSource.default_tab_index,
-        DEFAULT_OPTIONS.defaultTabIndex
+      defaultTabIndex,
+      defaultTabId: asString(optionsSource.defaultTabId || optionsSource.default_tab_id || "", ""),
+      keepAlive: asBool(optionsSource.keepAlive ?? optionsSource.keep_alive, DEFAULT_OPTIONS.keepAlive),
+      lazy: asBool(optionsSource.lazy ?? optionsSource.lazy_load, DEFAULT_OPTIONS.lazy),
+      preload: enumValue(
+        optionsSource.preload || (asBool(optionsSource.lazy ?? true, true) ? "active" : "all"),
+        ["active", "idle", "all"],
+        DEFAULT_OPTIONS.preload
       ),
-      keepAlive: optionsSource.keepAlive ?? optionsSource.keep_alive ?? DEFAULT_OPTIONS.keepAlive,
-      lazy: optionsSource.lazy ?? optionsSource.lazy_load ?? DEFAULT_OPTIONS.lazy,
-      showIcons: optionsSource.showIcons ?? optionsSource.show_icons ?? DEFAULT_OPTIONS.showIcons,
-      showLabels:
-        optionsSource.showLabels ?? optionsSource.show_labels ?? DEFAULT_OPTIONS.showLabels,
+      maxCachedTabs: Math.max(
+        0,
+        toNumber(optionsSource.maxCachedTabs ?? optionsSource.max_cached_tabs, 0)
+      ),
+      showIcons: asBool(optionsSource.showIcons ?? optionsSource.show_icons, DEFAULT_OPTIONS.showIcons),
+      showLabels: asBool(
+        optionsSource.showLabels ?? optionsSource.show_labels,
+        DEFAULT_OPTIONS.showLabels
+      ),
+      hideInactiveLabels: asBool(
+        optionsSource.hideInactiveLabels ?? optionsSource.hide_inactive_labels,
+        DEFAULT_OPTIONS.hideInactiveLabels
+      ),
+      remember: enumValue(rememberMode, ["none", "card", "browser", "user"], DEFAULT_OPTIONS.remember),
+      storageKey: asString(optionsSource.storageKey || optionsSource.storage_key || "", ""),
+      deepLink: asBool(optionsSource.deepLink ?? optionsSource.deep_link, DEFAULT_OPTIONS.deepLink),
+      updateHash: asBool(optionsSource.updateHash ?? optionsSource.update_hash, DEFAULT_OPTIONS.updateHash),
+      hashPrefix: asString(optionsSource.hashPrefix || optionsSource.hash_prefix || "", ""),
+      swipe: asBool(optionsSource.swipe ?? optionsSource.enable_swipe, DEFAULT_OPTIONS.swipe),
+      swipeThreshold: clamp(
+        toNumber(optionsSource.swipeThreshold ?? optionsSource.swipe_threshold, 48),
+        16,
+        180
+      ),
+      haptic: asBool(optionsSource.haptic ?? optionsSource.haptic_feedback, DEFAULT_OPTIONS.haptic),
+      animate: asBool(optionsSource.animate ?? optionsSource.swipe_animation, DEFAULT_OPTIONS.animate),
+      keyboardNavigation: asBool(
+        optionsSource.keyboardNavigation ?? optionsSource.keyboard_navigation,
+        DEFAULT_OPTIONS.keyboardNavigation
+      ),
+      autoSelectFirstVisible: asBool(
+        optionsSource.autoSelectFirstVisible ?? optionsSource.auto_select_first_visible,
+        DEFAULT_OPTIONS.autoSelectFirstVisible
+      ),
+      scrollActiveIntoView: asBool(
+        optionsSource.scrollActiveIntoView ?? optionsSource.scroll_active_into_view,
+        DEFAULT_OPTIONS.scrollActiveIntoView
+      ),
+      ariaLabel: asString(optionsSource.ariaLabel || optionsSource.aria_label, DEFAULT_OPTIONS.ariaLabel),
     }
 
     const stylesSource = source.styles || {}
     const styles = {
       ...DEFAULT_STYLES,
-      background_color: stylesSource.background_color || DEFAULT_STYLES.background_color,
+      tab_position: enumValue(
+        stylesSource.tab_position || stylesSource.tabPosition || source.tab_position,
+        ["top", "bottom", "left", "right"],
+        DEFAULT_STYLES.tab_position
+      ),
+      alignment: enumValue(
+        stylesSource.alignment || source.tabs_alignment,
+        ["start", "center", "end", "stretch"],
+        DEFAULT_STYLES.alignment
+      ),
+      variant: enumValue(
+        stylesSource.variant || stylesSource.style || "pills",
+        ["pills", "segmented", "underline", "minimal"],
+        DEFAULT_STYLES.variant
+      ),
+      density: enumValue(stylesSource.density || "comfortable", ["compact", "comfortable"], "comfortable"),
+      icon_position: enumValue(
+        stylesSource.icon_position || stylesSource.iconPosition,
+        ["inline", "stacked"],
+        DEFAULT_STYLES.icon_position
+      ),
+      equal_width: asBool(stylesSource.equal_width ?? stylesSource.equalWidth, DEFAULT_STYLES.equal_width),
+      wrap_tabs: asBool(stylesSource.wrap_tabs ?? stylesSource.wrapTabs, DEFAULT_STYLES.wrap_tabs),
+      background_color:
+        stylesSource.background_color ||
+        stylesSource.card_background ||
+        source.card_background ||
+        DEFAULT_STYLES.background_color,
+      panel_background: stylesSource.panel_background || DEFAULT_STYLES.panel_background,
+      bar_background:
+        stylesSource.bar_background || source.bar_background || DEFAULT_STYLES.bar_background,
       text_color: stylesSource.text_color || DEFAULT_STYLES.text_color,
       active_color:
         stylesSource.active_color ||
+        stylesSource.button_active_background ||
         stylesSource["--mdc-theme-primary"] ||
         DEFAULT_STYLES.active_color,
+      active_text_color:
+        stylesSource.active_text_color ||
+        stylesSource.button_active_text_color ||
+        DEFAULT_STYLES.active_text_color,
       inactive_color:
         stylesSource.inactive_color ||
+        stylesSource.button_text_color ||
         stylesSource["--mdc-tab-color-default"] ||
         DEFAULT_STYLES.inactive_color,
-      border_color: stylesSource.border_color || DEFAULT_STYLES.border_color,
+      hover_color: stylesSource.hover_color || stylesSource.button_hover_color || DEFAULT_STYLES.hover_color,
+      border_color:
+        stylesSource.border_color || stylesSource.button_border_color || DEFAULT_STYLES.border_color,
+      badge_color: stylesSource.badge_color || DEFAULT_STYLES.badge_color,
+      shadow: stylesSource.shadow ?? DEFAULT_STYLES.shadow,
+      radius: stylesSource.radius || stylesSource.card_border_radius || DEFAULT_STYLES.radius,
+      tab_radius: stylesSource.tab_radius || stylesSource.button_border_radius || DEFAULT_STYLES.tab_radius,
+      tab_gap: stylesSource.tab_gap || stylesSource.tabs_gap || DEFAULT_STYLES.tab_gap,
+      tab_padding: stylesSource.tab_padding || stylesSource.button_padding || DEFAULT_STYLES.tab_padding,
+      header_padding: stylesSource.header_padding || stylesSource.bar_padding || DEFAULT_STYLES.header_padding,
+      panel_padding: stylesSource.panel_padding || stylesSource.card_padding || DEFAULT_STYLES.panel_padding,
+      content_gap: stylesSource.content_gap || DEFAULT_STYLES.content_gap,
+      min_height: stylesSource.min_height || DEFAULT_STYLES.min_height,
     }
 
-    const normalizedTabs = tabs.map((tab, index) => {
-      const card = tab?.card
-      if (!card || typeof card !== "object") {
-        throw new Error("Tabbed Card: each tab must contain a valid card configuration.")
-      }
-
-      return {
-        attributes: {
-          label: resolveTabLabel(tab, index),
-          icon: resolveTabIcon(tab),
-          hidden: Boolean(tab?.attributes?.hidden || tab?.hidden),
-        },
-        card: clone(card),
-        styles: tab?.styles && typeof tab.styles === "object" ? { ...tab.styles } : {},
-      }
-    })
-
+    const normalizedTabs = tabs.map(normalizeTab)
     options.defaultTabIndex = clamp(options.defaultTabIndex, 0, normalizedTabs.length - 1)
 
     return {
+      type: source.type || "custom:" + CARD_TYPE,
       options,
       styles,
       tabs: normalizedTabs,
     }
+  }
+
+  function toPublicConfig(config) {
+    return {
+      type: config.type || "custom:" + CARD_TYPE,
+      options: clone(config.options),
+      styles: clone(config.styles),
+      tabs: config.tabs.map((tab) => {
+        const publicTab = {
+          attributes: clone(tab.attributes),
+          styles: clone(tab.styles),
+          conditions: clone(tab.conditions),
+          badge: clone(tab.badge),
+        }
+        if (tab.cards.length === 1) {
+          publicTab.card = clone(tab.cards[0])
+        } else {
+          publicTab.cards = clone(tab.cards)
+        }
+        return publicTab
+      }),
+    }
+  }
+
+  function truthy(value) {
+    if (value === true) return true
+    if (value === false || value === undefined || value === null) return false
+    if (typeof value === "number") return value > 0
+    const text = String(value).trim().toLowerCase()
+    if (!text || ["false", "off", "no", "none", "null", "undefined", "0"].includes(text)) {
+      return false
+    }
+    return true
+  }
+
+  function compareState(actual, expected) {
+    if (expected === undefined || expected === null || expected === "") return true
+    const actualText = String(actual ?? "")
+    const expectedText = String(expected).trim()
+    const numericMatch = expectedText.match(/^(>=|<=|>|<|==|=)\s*(-?\d+(?:\.\d+)?)$/)
+    if (numericMatch) {
+      const actualNumber = Number(actualText)
+      const expectedNumber = Number(numericMatch[2])
+      if (!Number.isFinite(actualNumber)) return false
+      switch (numericMatch[1]) {
+        case ">":
+          return actualNumber > expectedNumber
+        case ">=":
+          return actualNumber >= expectedNumber
+        case "<":
+          return actualNumber < expectedNumber
+        case "<=":
+          return actualNumber <= expectedNumber
+        default:
+          return actualNumber === expectedNumber
+      }
+    }
+    return actualText === expectedText
+  }
+
+  function getStateValue(hass, entity, attribute) {
+    const stateObj = hass?.states?.[entity]
+    if (!stateObj) return undefined
+    if (attribute) return stateObj.attributes?.[attribute]
+    return stateObj.state
+  }
+
+  function summarizeCard(card) {
+    if (!card) return "Card"
+    const entity = card.entity || (Array.isArray(card.entities) ? card.entities[0] : "")
+    const entityText = isObject(entity) ? entity.entity || entity.name || "" : entity
+    return [card.type || "card", card.title || card.name || entityText].filter(Boolean).join(" - ")
+  }
+
+  function getCardTagName(type) {
+    if (!type) return ""
+    if (type.startsWith("custom:")) return type.slice(7)
+    return "hui-" + type + "-card"
+  }
+
+  function getLovelace() {
+    try {
+      return document
+        .querySelector("home-assistant")
+        ?.shadowRoot?.querySelector("home-assistant-main")
+        ?.shadowRoot?.querySelector("ha-panel-lovelace")?.lovelace
+    } catch (_) {
+      return null
+    }
+  }
+
+  function requestIdle(fn) {
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(fn, { timeout: 1500 })
+      return
+    }
+    window.setTimeout(fn, 80)
   }
 
   class TabbedCard extends HTMLElement {
@@ -123,79 +563,121 @@
 
     static getStubConfig() {
       return {
-        type: "custom:tabbed-card",
+        type: "custom:" + CARD_TYPE,
         options: {
           defaultTabIndex: 0,
           keepAlive: true,
           lazy: true,
+          preload: "active",
           showIcons: true,
           showLabels: true,
+          swipe: true,
         },
         styles: {
-          active_color: "var(--primary-color, #00AEEF)",
-          inactive_color: "var(--secondary-text-color, #9CA3AF)",
+          variant: "pills",
+          tab_position: "top",
+          active_color: "var(--primary-color)",
+          inactive_color: "var(--secondary-text-color)",
         },
         tabs: [
           {
             attributes: {
-              label: "Sun",
-              icon: "mdi:white-balance-sunny",
+              label: "Overview",
+              icon: "mdi:view-dashboard",
+              id: "overview",
             },
             card: {
               type: "entity",
               entity: "sun.sun",
             },
           },
+          {
+            attributes: {
+              label: "Details",
+              icon: "mdi:format-list-bulleted",
+              id: "details",
+            },
+            card: {
+              type: "markdown",
+              content: "Add any Home Assistant card here from the visual editor.",
+            },
+          },
         ],
+      }
+    }
+
+    static getGridOptions() {
+      return {
+        columns: 12,
+        min_columns: 6,
+        rows: 4,
+        min_rows: 2,
       }
     }
 
     constructor() {
       super()
       this.attachShadow({ mode: "open" })
-
+      this._instanceId = ++instanceCounter
       this._hass = null
       this._config = null
       this._helpersPromise = null
       this._selectedIndex = 0
-      this._cardCache = new Map()
       this._activeCardIndex = -1
-      this._pendingRender = false
+      this._cardCache = new Map()
+      this._cardCreation = new Map()
+      this._cacheOrder = []
+      this._visibleIndices = []
+      this._pendingTabsRender = false
+      this._renderVersion = 0
+      this._watchSignature = ""
+      this._templateResults = new Map()
+      this._templatePending = false
+      this._touchStart = null
 
       this._onTabClick = this._onTabClick.bind(this)
       this._onTabKeydown = this._onTabKeydown.bind(this)
+      this._onPanelTouchStart = this._onPanelTouchStart.bind(this)
+      this._onPanelTouchEnd = this._onPanelTouchEnd.bind(this)
     }
 
     setConfig(config) {
       this._config = normalizeConfig(config)
-      this._selectedIndex = this._config.options.defaultTabIndex
-      this._cardCache.clear()
+      this._renderVersion += 1
+      this._helpersPromise = window.loadCardHelpers
+        ? window.loadCardHelpers()
+        : Promise.reject(new Error("window.loadCardHelpers is not available."))
+      this._selectedIndex = this._resolveInitialIndex()
       this._activeCardIndex = -1
-
-      if (!this._helpersPromise) {
-        this._helpersPromise = window.loadCardHelpers
-          ? window.loadCardHelpers()
-          : Promise.reject(new Error("window.loadCardHelpers is not available."))
-      }
-
+      this._cardCache.clear()
+      this._cardCreation.clear()
+      this._cacheOrder = []
       this._renderShell()
-      this._renderTabsOnly()
-      this._activateTab(this._selectedIndex, { force: true })
-
-      if (!this._config.options.lazy) {
-        this._warmupAllTabs().catch(() => {})
+      this._refreshVisibleTabs()
+      this._activateTab(this._selectedIndex, { force: true, silent: true })
+      if (this._config.options.preload === "all") {
+        this._warmupAllTabs()
+      } else if (this._config.options.preload === "idle") {
+        requestIdle(() => this._warmupVisibleNeighbors())
       }
+      this._scheduleTemplateEvaluation()
     }
 
     set hass(hass) {
       this._hass = hass
-      if (!hass) return
-
       this._cardCache.forEach((entry) => {
-        if (entry?.card) {
-          entry.card.hass = hass
-        }
+        entry.cards.forEach((card) => {
+          if (card) card.hass = hass
+        })
       })
+
+      if (!this._config) return
+      const nextSignature = this._buildWatchSignature()
+      if (nextSignature !== this._watchSignature) {
+        this._watchSignature = nextSignature
+        this._refreshVisibleTabs()
+        this._scheduleTemplateEvaluation()
+      }
     }
 
     get hass() {
@@ -203,30 +685,101 @@
     }
 
     getCardSize() {
-      return 4
+      const active = this._cardCache.get(this._selectedIndex)
+      if (!active) return 4
+      return Math.max(
+        1,
+        active.cards.reduce((size, card) => {
+          if (card && typeof card.getCardSize === "function") {
+            try {
+              return size + Number(card.getCardSize())
+            } catch (_) {
+              return size + 1
+            }
+          }
+          return size + 1
+        }, 0)
+      )
     }
 
     connectedCallback() {
       if (this._config && !this.shadowRoot.innerHTML) {
         this._renderShell()
-        this._renderTabsOnly()
-        this._activateTab(this._selectedIndex, { force: true })
+        this._refreshVisibleTabs()
+        this._activateTab(this._selectedIndex, { force: true, silent: true })
       }
     }
 
-    _scheduleTabHeaderRefresh() {
-      if (this._pendingRender) return
-      this._pendingRender = true
+    disconnectedCallback() {
+      this._touchStart = null
+    }
 
-      queueMicrotask(() => {
-        this._pendingRender = false
-        this._renderTabsOnly()
-      })
+    _resolveInitialIndex() {
+      if (!this._config) return 0
+      const { options, tabs } = this._config
+      const hashIndex = this._getIndexFromHash()
+      if (hashIndex !== -1) return hashIndex
+
+      const remembered = this._readRememberedIndex()
+      if (remembered !== -1) return remembered
+
+      if (options.defaultTabId) {
+        const byId = tabs.findIndex((tab) => tab.attributes.id === options.defaultTabId)
+        if (byId !== -1) return byId
+      }
+
+      return clamp(options.defaultTabIndex, 0, tabs.length - 1)
+    }
+
+    _getIndexFromHash() {
+      if (!this._config?.options.deepLink) return -1
+      const rawHash = decodeURIComponent((window.location.hash || "").replace(/^#/, ""))
+      if (!rawHash) return -1
+      const prefix = this._config.options.hashPrefix || ""
+      const tabId = prefix && rawHash.startsWith(prefix) ? rawHash.slice(prefix.length) : rawHash
+      return this._config.tabs.findIndex((tab) => tab.attributes.id === tabId)
+    }
+
+    _storageKey() {
+      const { options } = this._config
+      if (options.remember === "none") return ""
+      if (options.storageKey) return "ultimate-tabbed-card:" + options.storageKey
+      const user = options.remember === "user" ? ":" + (this._hass?.user?.id || "anonymous") : ""
+      const path = options.remember === "browser" ? window.location.pathname : ""
+      const ids = this._config.tabs.map((tab) => tab.attributes.id).join("|")
+      return "ultimate-tabbed-card:" + path + ":" + ids + user
+    }
+
+    _readRememberedIndex() {
+      const key = this._storageKey()
+      if (!key) return -1
+      try {
+        const stored = Number(window.localStorage.getItem(key))
+        if (Number.isFinite(stored) && stored >= 0 && stored < this._config.tabs.length) {
+          return stored
+        }
+      } catch (_) {}
+      return -1
+    }
+
+    _rememberIndex(index) {
+      const key = this._storageKey()
+      if (!key) return
+      try {
+        window.localStorage.setItem(key, String(index))
+      } catch (_) {}
+    }
+
+    _updateHash(index) {
+      if (!this._config.options.updateHash) return
+      const tab = this._config.tabs[index]
+      if (!tab?.attributes.id) return
+      const nextHash = "#" + encodeURIComponent(this._config.options.hashPrefix + tab.attributes.id)
+      if (window.location.hash === nextHash) return
+      history.replaceState(null, "", window.location.pathname + window.location.search + nextHash)
     }
 
     _renderShell() {
-      if (!this.shadowRoot) return
-
       this.shadowRoot.innerHTML = `
         <style>
           :host {
@@ -234,81 +787,248 @@
           }
 
           .card {
-            border-radius: var(--ha-card-border-radius, 12px);
+            --utc-align: flex-start;
+            background: var(--utc-background);
+            color: var(--utc-text);
+            border: 1px solid var(--utc-border);
+            border-radius: var(--utc-radius);
+            box-shadow: var(--utc-shadow);
+            min-height: var(--utc-min-height);
             overflow: hidden;
-            border: 1px solid var(--tabs-border-color);
-            background: var(--tabs-bg);
-            color: var(--tabs-text);
+          }
+
+          .surface {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+          }
+
+          .card.position-left .surface,
+          .card.position-right .surface {
+            flex-direction: row;
+          }
+
+          .card.position-right .tabs-shell,
+          .card.position-bottom .tabs-shell {
+            order: 2;
+          }
+
+          .tabs-shell {
+            background: var(--utc-bar-background);
+            border-bottom: 1px solid var(--utc-border);
+            padding: var(--utc-header-padding);
+            min-width: 0;
+          }
+
+          .card.position-bottom .tabs-shell {
+            border-top: 1px solid var(--utc-border);
+            border-bottom: 0;
+          }
+
+          .card.position-left .tabs-shell,
+          .card.position-right .tabs-shell {
+            border-bottom: 0;
+            border-inline-end: 1px solid var(--utc-border);
+            max-width: min(42%, 240px);
+          }
+
+          .card.position-right .tabs-shell {
+            border-inline-start: 1px solid var(--utc-border);
+            border-inline-end: 0;
           }
 
           .tabs {
             display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 8px;
-            border-bottom: 1px solid var(--tabs-border-color);
+            justify-content: var(--utc-align);
+            gap: var(--utc-tab-gap);
             overflow-x: auto;
+            overflow-y: hidden;
+            flex-wrap: nowrap;
             scrollbar-width: thin;
+            scroll-snap-type: x proximity;
+          }
+
+          .card.wrap-tabs .tabs {
+            flex-wrap: wrap;
+            overflow-x: visible;
+          }
+
+          .card.position-left .tabs,
+          .card.position-right .tabs {
+            align-items: stretch;
+            flex-direction: column;
+            overflow-x: hidden;
+            overflow-y: auto;
+            max-height: 100%;
           }
 
           .tabs::-webkit-scrollbar {
             height: 6px;
+            width: 6px;
           }
 
           .tabs::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.18);
+            background: color-mix(in srgb, var(--utc-inactive) 35%, transparent);
             border-radius: 999px;
           }
 
           .tab-btn {
             appearance: none;
+            position: relative;
             border: 1px solid transparent;
-            border-radius: 10px;
+            border-radius: var(--utc-tab-radius);
             background: transparent;
-            color: var(--tabs-inactive);
+            color: var(--utc-inactive);
             font: inherit;
             font-size: 0.9rem;
             line-height: 1;
+            min-width: 0;
+            max-width: 100%;
             white-space: nowrap;
-            padding: 9px 12px;
+            padding: var(--utc-tab-padding);
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 8px;
             cursor: pointer;
-            transition: color 180ms ease, background 180ms ease, border-color 180ms ease;
+            scroll-snap-align: nearest;
+            transition: color 160ms ease, background 160ms ease, border-color 160ms ease,
+              transform 160ms ease;
           }
 
-          .tab-btn:hover {
-            border-color: rgba(255, 255, 255, 0.18);
-            color: var(--tabs-text);
-            background: rgba(255, 255, 255, 0.05);
+          .card.equal-width .tab-btn {
+            flex: 1 1 0;
+          }
+
+          .card.icon-stacked .tab-btn {
+            flex-direction: column;
+            gap: 5px;
+          }
+
+          .tab-btn:hover:not(:disabled) {
+            color: var(--utc-text);
+            background: var(--utc-hover);
+          }
+
+          .tab-btn:focus-visible {
+            outline: 2px solid var(--utc-active);
+            outline-offset: 2px;
+          }
+
+          .tab-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.45;
           }
 
           .tab-btn.active {
-            color: var(--tabs-active);
-            border-color: color-mix(in srgb, var(--tabs-active) 35%, transparent);
-            background: color-mix(in srgb, var(--tabs-active) 12%, transparent);
+            color: var(--utc-active-text);
+          }
+
+          .card.variant-pills .tab-btn.active,
+          .card.variant-segmented .tab-btn.active {
+            color: var(--utc-active-text);
+            border-color: color-mix(in srgb, var(--utc-active) 50%, transparent);
+            background: var(--utc-active);
+          }
+
+          .card.variant-segmented .tabs {
+            background: var(--utc-bar-background);
+            border: 1px solid var(--utc-border);
+            border-radius: calc(var(--utc-tab-radius) + 3px);
+            padding: 3px;
+          }
+
+          .card.variant-underline .tab-btn,
+          .card.variant-minimal .tab-btn {
+            border-radius: 0;
+            border-bottom-color: transparent;
+          }
+
+          .card.variant-underline .tab-btn.active {
+            color: var(--utc-active);
+            border-bottom-color: var(--utc-active);
+            background: transparent;
+          }
+
+          .card.variant-minimal .tab-btn.active {
+            color: var(--utc-active);
+            background: color-mix(in srgb, var(--utc-active) 10%, transparent);
+          }
+
+          .card.hide-inactive-labels .tab-btn:not(.active) .tab-label {
+            display: none;
+          }
+
+          .tab-label {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
           }
 
           .tab-icon {
-            width: 18px;
-            height: 18px;
+            width: 19px;
+            height: 19px;
+            flex: 0 0 auto;
+          }
+
+          .badge {
+            min-width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: var(--utc-badge);
+            color: var(--text-primary-color, #fff);
+            font-size: 0.68rem;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+          }
+
+          .badge.text,
+          .badge.count,
+          .badge.state,
+          .badge.exclamation {
+            min-width: 17px;
+            height: 17px;
+            padding: 0 5px;
           }
 
           .panel {
-            position: relative;
-            min-height: 72px;
-            padding: 10px;
+            min-width: 0;
+            flex: 1 1 auto;
+            background: var(--utc-panel-background);
+            padding: var(--utc-panel-padding);
+            touch-action: pan-y;
+          }
+
+          .card.position-left .panel,
+          .card.position-right .panel {
+            min-width: 0;
           }
 
           .pane {
             display: none;
+            min-width: 0;
+            contain: layout style;
           }
 
           .pane.active {
             display: block;
           }
 
+          .card.animate .pane.active {
+            animation: utc-pane-in 140ms ease-out;
+          }
+
+          .card-stack {
+            display: grid;
+            gap: var(--utc-content-gap);
+            min-width: 0;
+          }
+
+          .empty,
           .error {
             border: 1px solid var(--error-color, #ef4444);
             border-radius: 10px;
@@ -316,201 +1036,623 @@
             color: var(--error-color, #ef4444);
             background: rgba(239, 68, 68, 0.08);
           }
+
+          @keyframes utc-pane-in {
+            from {
+              opacity: 0.7;
+              transform: translateY(2px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+
+          @media (max-width: 720px) {
+            .card.position-left .surface,
+            .card.position-right .surface {
+              flex-direction: column;
+            }
+
+            .card.position-left .tabs-shell,
+            .card.position-right .tabs-shell {
+              max-width: none;
+              border-inline: 0;
+              border-bottom: 1px solid var(--utc-border);
+            }
+
+            .card.position-left .tabs,
+            .card.position-right .tabs {
+              flex-direction: row;
+              overflow-x: auto;
+              overflow-y: hidden;
+            }
+          }
         </style>
-        <div
-          class="card"
-          style="--tabs-bg:${this._config.styles.background_color};--tabs-text:${this._config.styles.text_color};--tabs-active:${this._config.styles.active_color};--tabs-inactive:${this._config.styles.inactive_color};--tabs-border-color:${this._config.styles.border_color};"
-        >
-          <div class="tabs" role="tablist" aria-label="Tabbed card tabs"></div>
-          <section class="panel"></section>
-        </div>
+        <ha-card class="card">
+          <div class="surface">
+            <header class="tabs-shell">
+              <div class="tabs" role="tablist"></div>
+            </header>
+            <section class="panel"></section>
+          </div>
+        </ha-card>
       `
 
-      this.shadowRoot.querySelector(".tabs").addEventListener("click", this._onTabClick)
-      this.shadowRoot.querySelector(".tabs").addEventListener("keydown", this._onTabKeydown)
+      const tabs = this.shadowRoot.querySelector(".tabs")
+      const panel = this.shadowRoot.querySelector(".panel")
+      tabs.addEventListener("click", this._onTabClick)
+      tabs.addEventListener("keydown", this._onTabKeydown)
+      panel.addEventListener("touchstart", this._onPanelTouchStart, { passive: true })
+      panel.addEventListener("touchend", this._onPanelTouchEnd, { passive: true })
+      this._applyStyleVars()
+    }
+
+    _applyStyleVars() {
+      const card = this.shadowRoot.querySelector(".card")
+      if (!card || !this._config) return
+      const styles = this._config.styles
+      const options = this._config.options
+      const alignMap = {
+        start: "flex-start",
+        center: "center",
+        end: "flex-end",
+        stretch: "stretch",
+      }
+      card.className = [
+        "card",
+        "position-" + styles.tab_position,
+        "variant-" + styles.variant,
+        "density-" + styles.density,
+        "icon-" + styles.icon_position,
+        styles.equal_width || styles.alignment === "stretch" ? "equal-width" : "",
+        styles.wrap_tabs ? "wrap-tabs" : "",
+        options.hideInactiveLabels ? "hide-inactive-labels" : "",
+        options.animate ? "animate" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+      card.style.setProperty("--utc-align", alignMap[styles.alignment] || "flex-start")
+      card.style.setProperty("--utc-background", styles.background_color)
+      card.style.setProperty("--utc-panel-background", styles.panel_background)
+      card.style.setProperty("--utc-bar-background", styles.bar_background)
+      card.style.setProperty("--utc-text", styles.text_color)
+      card.style.setProperty("--utc-active", styles.active_color)
+      card.style.setProperty("--utc-active-text", styles.active_text_color)
+      card.style.setProperty("--utc-inactive", styles.inactive_color)
+      card.style.setProperty("--utc-hover", styles.hover_color)
+      card.style.setProperty("--utc-border", styles.border_color)
+      card.style.setProperty("--utc-badge", styles.badge_color)
+      card.style.setProperty("--utc-shadow", styles.shadow)
+      card.style.setProperty("--utc-radius", styles.radius)
+      card.style.setProperty("--utc-tab-radius", styles.tab_radius)
+      card.style.setProperty("--utc-tab-gap", styles.tab_gap)
+      card.style.setProperty("--utc-tab-padding", styles.tab_padding)
+      card.style.setProperty("--utc-header-padding", styles.header_padding)
+      card.style.setProperty("--utc-panel-padding", styles.panel_padding)
+      card.style.setProperty("--utc-content-gap", styles.content_gap)
+      card.style.setProperty("--utc-min-height", styles.min_height)
+      this.shadowRoot
+        .querySelector(".tabs")
+        ?.setAttribute("aria-label", options.ariaLabel || DEFAULT_OPTIONS.ariaLabel)
+    }
+
+    _scheduleTabsRender() {
+      if (this._pendingTabsRender) return
+      this._pendingTabsRender = true
+      queueMicrotask(() => {
+        this._pendingTabsRender = false
+        this._renderTabsOnly()
+      })
+    }
+
+    _refreshVisibleTabs() {
+      if (!this._config || !this.shadowRoot) return
+      this._visibleIndices = this._config.tabs
+        .map((tab, index) => (this._isTabVisible(tab) ? index : -1))
+        .filter((index) => index !== -1)
+
+      if (
+        this._config.options.autoSelectFirstVisible &&
+        (!this._visibleIndices.includes(this._selectedIndex) ||
+          this._config.tabs[this._selectedIndex]?.attributes.disabled)
+      ) {
+        const next = this._visibleIndices.find((index) => !this._config.tabs[index].attributes.disabled)
+        if (next !== undefined && next !== this._selectedIndex) {
+          this._selectedIndex = next
+          if (this._activeCardIndex !== -1) {
+            this._activateTab(next, { force: true, silent: true })
+          }
+        }
+      }
+
+      this._scheduleTabsRender()
+      if (!this._visibleIndices.length) {
+        this._renderEmptyPanel("No visible tabs match the current conditions.")
+      }
     }
 
     _renderTabsOnly() {
       if (!this._config || !this.shadowRoot) return
-
+      this._applyStyleVars()
       const tabsEl = this.shadowRoot.querySelector(".tabs")
       if (!tabsEl) return
-
       const fragment = document.createDocumentFragment()
-      this._config.tabs.forEach((tab, index) => {
-        if (tab.attributes.hidden) return
 
+      this._visibleIndices.forEach((index) => {
+        const tab = this._config.tabs[index]
         const button = document.createElement("button")
         button.type = "button"
         button.className = "tab-btn" + (index === this._selectedIndex ? " active" : "")
         button.dataset.index = String(index)
+        button.disabled = Boolean(tab.attributes.disabled)
         button.setAttribute("role", "tab")
         button.setAttribute("aria-selected", index === this._selectedIndex ? "true" : "false")
+        button.setAttribute("aria-controls", "utc-panel-" + this._instanceId + "-" + index)
         button.setAttribute("tabindex", index === this._selectedIndex ? "0" : "-1")
+        button.id = "utc-tab-" + this._instanceId + "-" + index
 
-        const showIcon = this._config.options.showIcons && tab.attributes.icon
-        const showLabel = this._config.options.showLabels
+        const accent = tab.styles?.accent_color || tab.styles?.active_color
+        const color = tab.styles?.color || tab.styles?.text_color
+        const background = tab.styles?.background_color
+        if (accent) button.style.setProperty("--utc-active", accent)
+        if (color) button.style.color = color
+        if (background) button.style.background = background
 
-        if (showIcon) {
+        if (this._config.options.showIcons && tab.attributes.icon) {
           const icon = document.createElement("ha-icon")
           icon.className = "tab-icon"
           icon.setAttribute("icon", tab.attributes.icon)
           button.appendChild(icon)
         }
 
-        if (showLabel) {
+        if (this._config.options.showLabels) {
           const label = document.createElement("span")
+          label.className = "tab-label"
           label.textContent = tab.attributes.label
           button.appendChild(label)
+        }
+
+        const badge = this._resolveBadge(tab)
+        if (badge) {
+          const badgeEl = document.createElement("span")
+          badgeEl.className = "badge " + badge.mode
+          badgeEl.textContent = badge.text
+          badgeEl.setAttribute("aria-label", badge.label)
+          button.appendChild(badgeEl)
         }
 
         fragment.appendChild(button)
       })
 
       tabsEl.replaceChildren(fragment)
+
+      if (this._config.options.scrollActiveIntoView) {
+        const active = tabsEl.querySelector('.tab-btn.active')
+        active?.scrollIntoView({ block: "nearest", inline: "nearest" })
+      }
+    }
+
+    _renderEmptyPanel(message) {
+      const panel = this.shadowRoot.querySelector(".panel")
+      if (!panel) return
+      const empty = document.createElement("div")
+      empty.className = "empty"
+      empty.textContent = message
+      panel.replaceChildren(empty)
     }
 
     _onTabClick(event) {
       const button = event.target.closest(".tab-btn")
-      if (!button) return
-      const index = Number(button.dataset.index)
-      this._activateTab(index)
+      if (!button || button.disabled) return
+      this._activateTab(Number(button.dataset.index))
     }
 
     _onTabKeydown(event) {
-      const buttons = Array.from(this.shadowRoot.querySelectorAll(".tab-btn"))
+      if (!this._config?.options.keyboardNavigation) return
+      const buttons = Array.from(this.shadowRoot.querySelectorAll(".tab-btn:not(:disabled)"))
       if (!buttons.length) return
+      const currentPosition = buttons.indexOf(event.target.closest(".tab-btn"))
+      if (currentPosition === -1) return
 
-      const current = Number(event.target?.dataset?.index ?? this._selectedIndex)
-      let next = current
-
-      if (event.key === "ArrowRight") {
-        next = (current + 1) % buttons.length
-      } else if (event.key === "ArrowLeft") {
-        next = (current - 1 + buttons.length) % buttons.length
+      const vertical = ["left", "right"].includes(this._config.styles.tab_position)
+      let nextPosition = currentPosition
+      if ((!vertical && event.key === "ArrowRight") || (vertical && event.key === "ArrowDown")) {
+        nextPosition = (currentPosition + 1) % buttons.length
+      } else if ((!vertical && event.key === "ArrowLeft") || (vertical && event.key === "ArrowUp")) {
+        nextPosition = (currentPosition - 1 + buttons.length) % buttons.length
       } else if (event.key === "Home") {
-        next = 0
+        nextPosition = 0
       } else if (event.key === "End") {
-        next = buttons.length - 1
+        nextPosition = buttons.length - 1
       } else {
         return
       }
 
       event.preventDefault()
-      const nextBtn = buttons[next]
-      nextBtn.focus()
-      const nextIndex = Number(nextBtn.dataset.index)
-      this._activateTab(nextIndex)
+      const nextButton = buttons[nextPosition]
+      nextButton.focus()
+      this._activateTab(Number(nextButton.dataset.index))
     }
 
     async _activateTab(index, options = {}) {
       if (!this._config || !this.shadowRoot) return
-
       const clamped = clamp(index, 0, this._config.tabs.length - 1)
+      const tab = this._config.tabs[clamped]
+      if (!tab || tab.attributes.disabled || !this._isTabVisible(tab)) return
       if (!options.force && clamped === this._selectedIndex && this._activeCardIndex === clamped) {
         return
       }
 
       this._selectedIndex = clamped
-      this._scheduleTabHeaderRefresh()
+      this._rememberIndex(clamped)
+      this._updateHash(clamped)
+      this._scheduleTabsRender()
+      if (!options.silent) this._haptic()
+      const renderVersion = this._renderVersion
 
       const panel = this.shadowRoot.querySelector(".panel")
       if (!panel) return
 
-      const keepAlive = Boolean(this._config.options.keepAlive)
-
-      if (!keepAlive && this._activeCardIndex !== -1 && this._activeCardIndex !== clamped) {
-        const previous = this._cardCache.get(this._activeCardIndex)
-        if (previous?.pane && previous.pane.isConnected) {
-          previous.pane.remove()
-        }
-        this._cardCache.delete(this._activeCardIndex)
+      if (!this._config.options.keepAlive && this._activeCardIndex !== -1 && this._activeCardIndex !== clamped) {
+        this._deleteCachedTab(this._activeCardIndex)
       }
 
-      if (keepAlive) {
-        this._cardCache.forEach((entry, entryIndex) => {
-          if (!entry?.pane) return
-          entry.pane.classList.toggle("active", entryIndex === clamped)
-        })
-      } else {
-        panel.querySelectorAll(".pane").forEach((pane) => pane.classList.remove("active"))
-      }
+      this._cardCache.forEach((entry, entryIndex) => {
+        entry.pane.classList.toggle("active", entryIndex === clamped)
+      })
 
       let entry = this._cardCache.get(clamped)
       if (!entry) {
-        entry = await this._createCardPane(clamped)
-        if (!entry) return
-        this._cardCache.set(clamped, entry)
-        panel.appendChild(entry.pane)
+        let creation = this._cardCreation.get(clamped)
+        if (!creation) {
+          creation = this._createCardPane(clamped).finally(() => {
+            this._cardCreation.delete(clamped)
+          })
+          this._cardCreation.set(clamped, creation)
+        }
+        entry = await creation
+        if (renderVersion !== this._renderVersion) return
+        if (!this._cardCache.has(clamped)) {
+          this._cardCache.set(clamped, entry)
+          panel.appendChild(entry.pane)
+        } else {
+          entry = this._cardCache.get(clamped)
+        }
       }
 
+      entry.lastUsed = Date.now()
       entry.pane.classList.add("active")
       this._activeCardIndex = clamped
+      this._touchCacheOrder(clamped)
+      this._enforceCacheLimit()
     }
 
     async _createCardPane(index) {
       const tab = this._config.tabs[index]
       const pane = document.createElement("div")
       pane.className = "pane"
+      pane.id = "utc-panel-" + this._instanceId + "-" + index
+      pane.setAttribute("role", "tabpanel")
+      pane.setAttribute("aria-labelledby", "utc-tab-" + this._instanceId + "-" + index)
 
-      try {
-        const helpers = await this._helpersPromise
-        const card = await helpers.createCardElement(tab.card)
+      if (tab.styles?.panel_background) pane.style.background = tab.styles.panel_background
+      if (tab.styles?.panel_padding) pane.style.padding = tab.styles.panel_padding
 
-        card.hass = this._hass
-        card.addEventListener(
-          "ll-rebuild",
-          (ev) => {
-            ev.stopPropagation()
-            this._rebuildCard(index).catch(() => {})
-          },
-          { once: true }
-        )
-
-        pane.appendChild(card)
-        return { pane, card }
-      } catch (error) {
-        const message = document.createElement("div")
-        message.className = "error"
-        message.textContent =
-          "Unable to create card for tab " +
-          String(index + 1) +
-          ". " +
-          (error && error.message ? error.message : "Unknown error")
-        pane.appendChild(message)
-        return { pane, card: null }
+      const cards = []
+      const parent = tab.cards.length > 1 ? document.createElement("div") : pane
+      if (parent !== pane) {
+        parent.className = "card-stack"
+        pane.appendChild(parent)
       }
+
+      for (let cardIndex = 0; cardIndex < tab.cards.length; cardIndex += 1) {
+        const cardConfig = tab.cards[cardIndex]
+        try {
+          const helpers = await this._helpersPromise
+          const card = await helpers.createCardElement(cardConfig)
+          card.hass = this._hass
+          card.addEventListener(
+            "ll-rebuild",
+            (event) => {
+              event.stopPropagation()
+              this._rebuildTab(index).catch(() => {})
+            },
+            { once: true }
+          )
+          parent.appendChild(card)
+          cards.push(card)
+        } catch (error) {
+          const errorEl = document.createElement("div")
+          errorEl.className = "error"
+          errorEl.textContent =
+            "Unable to create card " +
+            String(cardIndex + 1) +
+            " for tab " +
+            String(index + 1) +
+            ". " +
+            (error?.message || "Unknown error")
+          parent.appendChild(errorEl)
+          cards.push(null)
+        }
+      }
+
+      return { pane, cards, lastUsed: Date.now() }
     }
 
-    async _warmupAllTabs() {
-      if (!this._config || !this.shadowRoot) return
-      const panel = this.shadowRoot.querySelector(".panel")
-      if (!panel) return
-
-      for (let index = 0; index < this._config.tabs.length; index += 1) {
-        if (this._cardCache.has(index)) continue
-        const entry = await this._createCardPane(index)
-        if (!entry) continue
-        this._cardCache.set(index, entry)
-        panel.appendChild(entry.pane)
-        entry.pane.classList.toggle("active", index === this._selectedIndex)
-      }
-    }
-
-    async _rebuildCard(index) {
-      if (!this._config) return
-
+    async _rebuildTab(index) {
       const current = this._cardCache.get(index)
       if (!current?.pane) return
-
       const replacement = await this._createCardPane(index)
-      if (!replacement) return
-
       current.pane.replaceWith(replacement.pane)
+      replacement.pane.classList.toggle("active", index === this._selectedIndex)
       this._cardCache.set(index, replacement)
-      if (index === this._activeCardIndex) {
-        replacement.pane.classList.add("active")
+    }
+
+    _touchCacheOrder(index) {
+      this._cacheOrder = this._cacheOrder.filter((entry) => entry !== index)
+      this._cacheOrder.push(index)
+    }
+
+    _deleteCachedTab(index) {
+      const entry = this._cardCache.get(index)
+      if (entry?.pane?.isConnected) entry.pane.remove()
+      this._cardCache.delete(index)
+      this._cacheOrder = this._cacheOrder.filter((entry) => entry !== index)
+    }
+
+    _enforceCacheLimit() {
+      const limit = this._config.options.maxCachedTabs
+      if (!limit || this._cardCache.size <= limit) return
+      for (const index of [...this._cacheOrder]) {
+        if (this._cardCache.size <= limit) return
+        if (index !== this._selectedIndex) this._deleteCachedTab(index)
       }
+    }
+
+    _warmupAllTabs() {
+      const renderVersion = this._renderVersion
+      requestIdle(async () => {
+        for (const index of this._visibleIndices) {
+          if (!this._cardCache.has(index) && !this._config.tabs[index].attributes.disabled) {
+            let creation = this._cardCreation.get(index)
+            if (!creation) {
+              creation = this._createCardPane(index).finally(() => this._cardCreation.delete(index))
+              this._cardCreation.set(index, creation)
+            }
+            const entry = await creation
+            if (renderVersion !== this._renderVersion || this._cardCache.has(index)) continue
+            entry.pane.classList.toggle("active", index === this._selectedIndex)
+            this._cardCache.set(index, entry)
+            this.shadowRoot.querySelector(".panel")?.appendChild(entry.pane)
+            this._touchCacheOrder(index)
+          }
+        }
+        this._enforceCacheLimit()
+      })
+    }
+
+    _warmupVisibleNeighbors() {
+      const renderVersion = this._renderVersion
+      const visiblePosition = this._visibleIndices.indexOf(this._selectedIndex)
+      const neighbors = [
+        this._visibleIndices[visiblePosition - 1],
+        this._visibleIndices[visiblePosition + 1],
+      ].filter((index) => index !== undefined)
+
+      requestIdle(async () => {
+        for (const index of neighbors) {
+          if (!this._cardCache.has(index) && !this._config.tabs[index].attributes.disabled) {
+            let creation = this._cardCreation.get(index)
+            if (!creation) {
+              creation = this._createCardPane(index).finally(() => this._cardCreation.delete(index))
+              this._cardCreation.set(index, creation)
+            }
+            const entry = await creation
+            if (renderVersion !== this._renderVersion || this._cardCache.has(index)) continue
+            this._cardCache.set(index, entry)
+            this.shadowRoot.querySelector(".panel")?.appendChild(entry.pane)
+            this._touchCacheOrder(index)
+          }
+        }
+        this._enforceCacheLimit()
+      })
+    }
+
+    _haptic() {
+      if (!this._config.options.haptic || !navigator.vibrate) return
+      try {
+        navigator.vibrate(8)
+      } catch (_) {}
+    }
+
+    _onPanelTouchStart(event) {
+      if (!this._config?.options.swipe || this._isHorizontalGestureTarget(event.target)) return
+      const touch = event.changedTouches?.[0]
+      if (!touch) return
+      this._touchStart = { x: touch.clientX, y: touch.clientY, at: Date.now() }
+    }
+
+    _onPanelTouchEnd(event) {
+      if (!this._touchStart || !this._config?.options.swipe) return
+      const touch = event.changedTouches?.[0]
+      if (!touch) return
+      const dx = touch.clientX - this._touchStart.x
+      const dy = touch.clientY - this._touchStart.y
+      this._touchStart = null
+      if (Math.abs(dx) < this._config.options.swipeThreshold || Math.abs(dx) < Math.abs(dy) * 1.35) {
+        return
+      }
+      if (dx < 0) this._activateRelative(1)
+      else this._activateRelative(-1)
+    }
+
+    _isHorizontalGestureTarget(start) {
+      let node = start
+      const panel = this.shadowRoot.querySelector(".panel")
+      while (node && node !== panel) {
+        if (node.dataset?.noSwipe !== undefined || node.dataset?.utcNoSwipe !== undefined) {
+          return true
+        }
+        if (node instanceof HTMLElement) {
+          const style = window.getComputedStyle(node)
+          const scrollable =
+            /(auto|scroll)/.test(style.overflowX) && node.scrollWidth > node.clientWidth + 8
+          if (scrollable) return true
+        }
+        node = node.parentElement || node.getRootNode?.().host
+      }
+      return false
+    }
+
+    _activateRelative(delta) {
+      const enabled = this._visibleIndices.filter((index) => !this._config.tabs[index].attributes.disabled)
+      const current = enabled.indexOf(this._selectedIndex)
+      if (current === -1 || enabled.length < 2) return
+      const next = enabled[(current + delta + enabled.length) % enabled.length]
+      this._activateTab(next)
+    }
+
+    _isTabVisible(tab) {
+      if (!tab || tab.attributes.hidden) return false
+      return tab.conditions.every((condition) => this._isConditionMet(condition))
+    }
+
+    _isConditionMet(condition) {
+      if (!condition) return true
+      if (condition.type === "entity") {
+        const stateObj = this._hass?.states?.[condition.entity]
+        const value = getStateValue(this._hass, condition.entity, condition.attribute)
+        if (condition.exists !== undefined && asBool(condition.exists, true) !== Boolean(stateObj)) {
+          return false
+        }
+        if (!stateObj) return false
+        if (condition.state && !compareState(value, condition.state)) return false
+        if (condition.state_not && compareState(value, condition.state_not)) return false
+        if (condition.above !== "" && !(Number(value) > Number(condition.above))) return false
+        if (condition.below !== "" && !(Number(value) < Number(condition.below))) return false
+        return true
+      }
+
+      if (condition.type === "user") {
+        const userId = this._hass?.user?.id || ""
+        const allowed = condition.user
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean)
+        const denied = condition.user_not
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean)
+        if (allowed.length && !allowed.includes(userId)) return false
+        if (denied.length && denied.includes(userId)) return false
+        return true
+      }
+
+      if (condition.type === "media") {
+        if (!condition.media_query || !window.matchMedia) return true
+        return window.matchMedia(condition.media_query).matches
+      }
+
+      if (condition.type === "template") {
+        if (!condition.template) return true
+        return truthy(this._templateResults.get(condition.template))
+      }
+
+      return true
+    }
+
+    _resolveBadge(tab) {
+      const badge = tab.badge
+      if (!badge || badge.mode === "none") return null
+      let text = badge.text
+      let active = false
+
+      if (badge.entity) {
+        const value = getStateValue(this._hass, badge.entity)
+        active = badge.state ? compareState(value, badge.state) : truthy(value)
+        if (badge.mode === "state") text = asString(value, "")
+      } else if (badge.template) {
+        const result = this._templateResults.get(badge.template)
+        active = truthy(result)
+        if (badge.mode === "text" || badge.mode === "state") text = asString(result, "")
+      } else {
+        active = truthy(text)
+      }
+
+      if (!active) return null
+      if (badge.mode === "dot") text = ""
+      if (badge.mode === "exclamation") text = "!"
+      return {
+        mode: badge.mode,
+        text: badge.mode === "count" && !text ? "1" : asString(text, ""),
+        label: "Tab badge",
+      }
+    }
+
+    _collectWatchEntities() {
+      if (!this._config) return []
+      const entities = new Set()
+      this._config.tabs.forEach((tab) => {
+        tab.conditions.forEach((condition) => {
+          if (condition.type === "entity" && condition.entity) entities.add(condition.entity)
+        })
+        if (tab.badge?.entity) entities.add(tab.badge.entity)
+      })
+      return [...entities]
+    }
+
+    _buildWatchSignature() {
+      const parts = [this._hass?.user?.id || ""]
+      this._collectWatchEntities().forEach((entity) => {
+        const stateObj = this._hass?.states?.[entity]
+        parts.push(entity + "=" + (stateObj ? stateObj.state : "missing"))
+      })
+      this._templateResults.forEach((value, key) => parts.push("tpl:" + key + "=" + value))
+      return parts.join("|")
+    }
+
+    _templateStrings() {
+      if (!this._config) return []
+      const templates = new Set()
+      this._config.tabs.forEach((tab) => {
+        tab.conditions.forEach((condition) => {
+          if (condition.type === "template" && condition.template) templates.add(condition.template)
+        })
+        if (tab.badge?.template) templates.add(tab.badge.template)
+      })
+      return [...templates]
+    }
+
+    _scheduleTemplateEvaluation() {
+      if (this._templatePending || !this._hass?.callApi) return
+      const templates = this._templateStrings()
+      if (!templates.length) return
+      this._templatePending = true
+      window.setTimeout(async () => {
+        const changed = await this._evaluateTemplates(templates)
+        this._templatePending = false
+        if (changed) this._refreshVisibleTabs()
+      }, 200)
+    }
+
+    async _evaluateTemplates(templates) {
+      let changed = false
+      for (const template of templates) {
+        try {
+          const result = await this._hass.callApi("POST", "template", { template })
+          if (this._templateResults.get(template) !== result) {
+            this._templateResults.set(template, result)
+            changed = true
+          }
+        } catch (_) {
+          if (this._templateResults.get(template) !== false) {
+            this._templateResults.set(template, false)
+            changed = true
+          }
+        }
+      }
+      return changed
     }
   }
 
@@ -520,636 +1662,1178 @@
       this.attachShadow({ mode: "open" })
       this._hass = null
       this._config = null
+      this._section = "general"
+      this._editingTabIndex = 0
       this._nativeEditors = new Map()
-      this._loadingEditor = new Set()
+      this._loadingEditors = new Set()
+      this._newCardType = "entity"
+
       this._onRootInput = this._onRootInput.bind(this)
-      this._onRootClick = this._onRootClick.bind(this)
       this._onRootChange = this._onRootChange.bind(this)
+      this._onRootClick = this._onRootClick.bind(this)
+      this._onValueChanged = this._onValueChanged.bind(this)
     }
 
     set hass(hass) {
       this._hass = hass
+      this._hydrateHaControls()
       this._nativeEditors.forEach((editor) => {
         editor.hass = hass
       })
     }
 
     setConfig(config) {
-      this._config = normalizeConfig(config)
+      try {
+        this._config = normalizeConfig(config)
+      } catch (_) {
+        this._config = normalizeConfig(TabbedCard.getStubConfig())
+      }
+      this._editingTabIndex = clamp(this._editingTabIndex, 0, this._config.tabs.length - 1)
       this._render()
     }
 
     _render() {
-      if (!this.shadowRoot || !this._config) return
-
-      const tabsHtml = this._config.tabs
-        .map((tab, index) => {
-          const cardText = JSON.stringify(tab.card, null, 2)
-          return `
-            <details class="tab-details" data-index="${index}" ${index === 0 ? "open" : ""}>
-              <summary>Tab ${index + 1}: ${this._escape(resolveTabLabel(tab, index))}</summary>
-              <div class="section-content">
-                <div class="row row-actions">
-                  <button type="button" data-action="move-up" data-index="${index}">Up</button>
-                  <button type="button" data-action="move-down" data-index="${index}">Down</button>
-                  <button type="button" data-action="delete-tab" data-index="${index}" class="danger">Delete</button>
-                </div>
-
-                <label>Label</label>
-                <input data-field="tab.label" data-index="${index}" value="${this._escape(
-                  tab.attributes.label
-                )}" />
-
-                <label>Icon (mdi:...)</label>
-                <input data-field="tab.icon" data-index="${index}" value="${this._escape(
-                  tab.attributes.icon || ""
-                )}" placeholder="mdi:home" />
-
-                <label>
-                  <input type="checkbox" data-field="tab.hidden" data-index="${index}" ${
-                    tab.attributes.hidden ? "checked" : ""
-                  } />
-                  Hide this tab
-                </label>
-
-                <label>Tab text color (optional)</label>
-                <input data-field="tab.style.color" data-index="${index}" value="${this._escape(
-                  tab.styles?.color || ""
-                )}" placeholder="#ffffff" />
-
-                <div class="native-editor-wrap">
-                  <div class="native-editor-title">Visual card editor (if available)</div>
-                  <div class="native-editor-host" id="native-editor-${index}"></div>
-                </div>
-
-                <label>Card JSON (fallback / manual)</label>
-                <textarea data-field="tab.card" data-index="${index}" rows="8">${this._escape(
-                  cardText
-                )}</textarea>
-                <div class="muted" id="json-error-${index}"></div>
-              </div>
-            </details>
-          `
-        })
-        .join("")
-
+      if (!this._config) return
+      this._nativeEditors.clear()
+      this._loadingEditors.clear()
       this.shadowRoot.innerHTML = `
         <style>
           :host {
             display: block;
           }
 
-          .form {
+          .editor {
             display: grid;
-            gap: 10px;
-            padding: 8px 0;
+            gap: 12px;
+            color: var(--primary-text-color);
           }
 
-          details {
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 10px;
-            background: rgba(255, 255, 255, 0.02);
-            overflow: hidden;
+          .nav {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 6px;
           }
 
-          details[open] {
-            border-color: rgba(56, 189, 248, 0.4);
-          }
-
-          summary {
-            list-style: none;
+          .nav button,
+          .action,
+          .icon-button {
+            appearance: none;
+            border: 1px solid var(--divider-color);
+            border-radius: 8px;
+            background: var(--secondary-background-color);
+            color: var(--primary-text-color);
+            min-height: 36px;
+            font: inherit;
             cursor: pointer;
-            padding: 10px 12px;
-            font-size: 0.86rem;
-            font-weight: 700;
-            color: var(--primary-text-color, #f9fafb);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
           }
 
-          summary::-webkit-details-marker {
+          .nav button.active {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+            background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+          }
+
+          .panel {
+            display: grid;
+            gap: 12px;
+          }
+
+          .panel[hidden] {
             display: none;
           }
 
-          .section-content {
+          .section,
+          .tab-body,
+          .card-item {
             display: grid;
             gap: 10px;
+            border: 1px solid var(--divider-color);
+            border-radius: 8px;
             padding: 12px;
+            background: color-mix(in srgb, var(--card-background-color, #fff) 90%, transparent);
           }
 
-          .row {
+          .section-title,
+          .card-title {
+            font-weight: 700;
+            font-size: 0.92rem;
+          }
+
+          .grid-2,
+          .grid-3,
+          .grid-4 {
             display: grid;
-            gap: 8px;
+            gap: 10px;
           }
 
-          .row-2 {
-            grid-template-columns: 1fr 1fr;
+          .grid-2 {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
-          .row-actions {
+          .grid-3 {
             grid-template-columns: repeat(3, minmax(0, 1fr));
           }
 
-          label {
-            font-size: 0.82rem;
-            color: var(--secondary-text-color, #9ca3af);
+          .grid-4 {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
           }
 
-          select,
+          label {
+            display: grid;
+            gap: 5px;
+            font-size: 0.8rem;
+            color: var(--secondary-text-color);
+          }
+
           input,
-          textarea,
-          button {
+          select,
+          textarea {
             width: 100%;
             box-sizing: border-box;
+            border: 1px solid var(--divider-color);
             border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            background: rgba(255, 255, 255, 0.04);
-            color: var(--primary-text-color, #f9fafb);
-            padding: 8px 10px;
+            background: var(--card-background-color, #fff);
+            color: var(--primary-text-color);
+            min-height: 36px;
+            padding: 7px 9px;
             font: inherit;
           }
 
+          input[type="checkbox"] {
+            width: auto;
+            min-height: auto;
+          }
+
+          input[type="color"] {
+            padding: 3px;
+          }
+
           textarea {
-            font-family: monospace;
+            min-height: 120px;
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
             resize: vertical;
-            min-height: 100px;
           }
 
-          button {
-            cursor: pointer;
-            background: rgba(56, 189, 248, 0.18);
-            border-color: rgba(56, 189, 248, 0.35);
-            font-weight: 600;
-          }
-
-          button.danger {
-            background: rgba(239, 68, 68, 0.18);
-            border-color: rgba(239, 68, 68, 0.4);
-          }
-
-          .native-editor-wrap {
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            padding: 10px;
-            display: grid;
+          .toggle {
+            display: flex;
+            align-items: center;
             gap: 8px;
+            color: var(--primary-text-color);
           }
 
-          .native-editor-title {
-            font-size: 0.8rem;
-            color: var(--secondary-text-color, #9ca3af);
-            font-weight: 600;
+          .toolbar,
+          .tab-list,
+          .card-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+          }
+
+          .tab-chip {
+            appearance: none;
+            border: 1px solid var(--divider-color);
+            border-radius: 999px;
+            background: transparent;
+            color: var(--primary-text-color);
+            padding: 7px 11px;
+            cursor: pointer;
+            font: inherit;
+          }
+
+          .tab-chip.active {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+            background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+          }
+
+          .icon-button {
+            width: 36px;
+            padding: 0;
+            display: inline-grid;
+            place-items: center;
+          }
+
+          .danger {
+            border-color: var(--error-color, #ef4444);
+            color: var(--error-color, #ef4444);
           }
 
           .muted {
+            color: var(--secondary-text-color);
             font-size: 0.78rem;
-            color: var(--secondary-text-color, #9ca3af);
-            min-height: 16px;
           }
 
           .error {
             color: var(--error-color, #ef4444);
+            min-height: 18px;
+            font-size: 0.78rem;
+          }
+
+          .native-editor-host {
+            display: grid;
+            gap: 8px;
+          }
+
+          .advanced-json summary {
+            cursor: pointer;
+            color: var(--secondary-text-color);
+            font-size: 0.8rem;
           }
 
           @media (max-width: 720px) {
-            .row-2,
-            .row-actions {
+            .nav,
+            .grid-2,
+            .grid-3,
+            .grid-4 {
               grid-template-columns: 1fr;
             }
           }
         </style>
-
-        <div class="form">
-          <details open>
-            <summary>General</summary>
-            <div class="section-content">
-              <label>Default tab index</label>
-              <input type="number" min="0" step="1" data-field="options.defaultTabIndex" value="${
-                this._config.options.defaultTabIndex
-              }" />
-
-              <label><input type="checkbox" data-field="options.keepAlive" ${
-                this._config.options.keepAlive ? "checked" : ""
-              } /> Keep inactive cards alive</label>
-              <label><input type="checkbox" data-field="options.lazy" ${
-                this._config.options.lazy ? "checked" : ""
-              } /> Lazy load tabs</label>
-              <label><input type="checkbox" data-field="options.showIcons" ${
-                this._config.options.showIcons ? "checked" : ""
-              } /> Show icons</label>
-              <label><input type="checkbox" data-field="options.showLabels" ${
-                this._config.options.showLabels ? "checked" : ""
-              } /> Show labels</label>
-            </div>
-          </details>
-
-          <details>
-            <summary>Styles</summary>
-            <div class="section-content">
-              <label>Background color</label>
-              <div class="row row-2">
-                <input type="color" data-field="styles.background_color_picker" value="${this._safeColor(
-                  this._config.styles.background_color,
-                  "#1f2937"
-                )}" />
-                <input data-field="styles.background_color" value="${this._escape(
-                  this._config.styles.background_color
-                )}" />
-              </div>
-
-              <label>Text color</label>
-              <div class="row row-2">
-                <input type="color" data-field="styles.text_color_picker" value="${this._safeColor(
-                  this._config.styles.text_color,
-                  "#f9fafb"
-                )}" />
-                <input data-field="styles.text_color" value="${this._escape(
-                  this._config.styles.text_color
-                )}" />
-              </div>
-
-              <label>Active color</label>
-              <div class="row row-2">
-                <input type="color" data-field="styles.active_color_picker" value="${this._safeColor(
-                  this._config.styles.active_color,
-                  "#00aeef"
-                )}" />
-                <input data-field="styles.active_color" value="${this._escape(
-                  this._config.styles.active_color
-                )}" />
-              </div>
-
-              <label>Inactive color</label>
-              <div class="row row-2">
-                <input type="color" data-field="styles.inactive_color_picker" value="${this._safeColor(
-                  this._config.styles.inactive_color,
-                  "#9ca3af"
-                )}" />
-                <input data-field="styles.inactive_color" value="${this._escape(
-                  this._config.styles.inactive_color
-                )}" />
-              </div>
-            </div>
-          </details>
-
-          <details open>
-            <summary>Tabs</summary>
-            <div class="section-content">
-              <button type="button" data-action="add-tab">+ Add tab</button>
-              ${tabsHtml}
-            </div>
-          </details>
+        <div class="editor">
+          <div class="nav" role="tablist" aria-label="Ultimate Tabbed Card editor sections">
+            ${this._navButton("general", "General")}
+            ${this._navButton("appearance", "Appearance")}
+            ${this._navButton("tabs", "Tabs")}
+            ${this._navButton("advanced", "Advanced")}
+          </div>
+          <section class="panel" data-panel="general" ${this._section === "general" ? "" : "hidden"}>
+            ${this._renderGeneralPanel()}
+          </section>
+          <section class="panel" data-panel="appearance" ${
+            this._section === "appearance" ? "" : "hidden"
+          }>
+            ${this._renderAppearancePanel()}
+          </section>
+          <section class="panel" data-panel="tabs" ${this._section === "tabs" ? "" : "hidden"}>
+            ${this._renderTabsPanel()}
+          </section>
+          <section class="panel" data-panel="advanced" ${
+            this._section === "advanced" ? "" : "hidden"
+          }>
+            ${this._renderAdvancedPanel()}
+          </section>
         </div>
       `
 
-      this.shadowRoot.removeEventListener("input", this._onRootInput)
-      this.shadowRoot.removeEventListener("change", this._onRootChange)
-      this.shadowRoot.removeEventListener("click", this._onRootClick)
       this.shadowRoot.addEventListener("input", this._onRootInput)
       this.shadowRoot.addEventListener("change", this._onRootChange)
       this.shadowRoot.addEventListener("click", this._onRootClick)
-
+      this.shadowRoot.addEventListener("value-changed", this._onValueChanged)
+      this._hydrateHaControls()
       this._mountNativeEditors()
     }
 
-    _onRootInput(event) {
-      const field = event.target?.dataset?.field
-      if (!field || !this._config) return
+    _navButton(section, label) {
+      return `<button type="button" data-action="section" data-section="${section}" class="${
+        this._section === section ? "active" : ""
+      }">${label}</button>`
+    }
 
-      if (field === "options.defaultTabIndex") {
-        this._config.options.defaultTabIndex = clamp(
-          toNumber(event.target.value, 0),
-          0,
-          Math.max(0, this._config.tabs.length - 1)
+    _renderGeneralPanel() {
+      const options = this._config.options
+      return `
+        <div class="section">
+          <div class="section-title">Behavior</div>
+          <div class="grid-3">
+            ${this._numberField("Default tab index", "options.defaultTabIndex", options.defaultTabIndex, 0)}
+            ${this._textField("Default tab id", "options.defaultTabId", options.defaultTabId, "overview")}
+            ${this._selectField("Remember tab", "options.remember", options.remember, [
+              ["none", "None"],
+              ["card", "This card"],
+              ["browser", "Per browser path"],
+              ["user", "Per Home Assistant user"],
+            ])}
+          </div>
+          <div class="grid-3">
+            ${this._selectField("Preload", "options.preload", options.preload, [
+              ["active", "Active tab only"],
+              ["idle", "Active plus neighbors"],
+              ["all", "All tabs"],
+            ])}
+            ${this._numberField("Max cached tabs", "options.maxCachedTabs", options.maxCachedTabs, 0)}
+            ${this._numberField("Swipe threshold", "options.swipeThreshold", options.swipeThreshold, 16)}
+          </div>
+          <div class="grid-3">
+            ${this._checkboxField("Keep inactive cards alive", "options.keepAlive", options.keepAlive)}
+            ${this._checkboxField("Swipe navigation", "options.swipe", options.swipe)}
+            ${this._checkboxField("Haptic feedback", "options.haptic", options.haptic)}
+          </div>
+          <div class="grid-3">
+            ${this._checkboxField("Show icons", "options.showIcons", options.showIcons)}
+            ${this._checkboxField("Show labels", "options.showLabels", options.showLabels)}
+            ${this._checkboxField("Hide inactive labels", "options.hideInactiveLabels", options.hideInactiveLabels)}
+          </div>
+          <div class="grid-3">
+            ${this._checkboxField("Deep links", "options.deepLink", options.deepLink)}
+            ${this._checkboxField("Update URL hash", "options.updateHash", options.updateHash)}
+            ${this._textField("Hash prefix", "options.hashPrefix", options.hashPrefix, "room-")}
+          </div>
+        </div>
+      `
+    }
+
+    _renderAppearancePanel() {
+      const styles = this._config.styles
+      return `
+        <div class="section">
+          <div class="section-title">Presets</div>
+          <div class="toolbar">
+            <button class="action" type="button" data-action="preset" data-preset="material">Material</button>
+            <button class="action" type="button" data-action="preset" data-preset="pills">Pills</button>
+            <button class="action" type="button" data-action="preset" data-preset="segmented">Segmented</button>
+            <button class="action" type="button" data-action="preset" data-preset="minimal">Minimal</button>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">Layout</div>
+          <div class="grid-4">
+            ${this._selectField("Tab position", "styles.tab_position", styles.tab_position, [
+              ["top", "Top"],
+              ["bottom", "Bottom"],
+              ["left", "Left"],
+              ["right", "Right"],
+            ])}
+            ${this._selectField("Alignment", "styles.alignment", styles.alignment, [
+              ["start", "Start"],
+              ["center", "Center"],
+              ["end", "End"],
+              ["stretch", "Stretch"],
+            ])}
+            ${this._selectField("Variant", "styles.variant", styles.variant, [
+              ["pills", "Pills"],
+              ["segmented", "Segmented"],
+              ["underline", "Underline"],
+              ["minimal", "Minimal"],
+            ])}
+            ${this._selectField("Density", "styles.density", styles.density, [
+              ["compact", "Compact"],
+              ["comfortable", "Comfortable"],
+            ])}
+          </div>
+          <div class="grid-3">
+            ${this._selectField("Icon position", "styles.icon_position", styles.icon_position, [
+              ["inline", "Inline"],
+              ["stacked", "Stacked"],
+            ])}
+            ${this._checkboxField("Equal width tabs", "styles.equal_width", styles.equal_width)}
+            ${this._checkboxField("Wrap tabs", "styles.wrap_tabs", styles.wrap_tabs)}
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">Colors</div>
+          ${this._colorPair("Background", "styles.background_color", styles.background_color, "#ffffff")}
+          ${this._colorPair("Panel background", "styles.panel_background", styles.panel_background, "#ffffff")}
+          ${this._colorPair("Tab bar background", "styles.bar_background", styles.bar_background, "#ffffff")}
+          ${this._colorPair("Text", "styles.text_color", styles.text_color, "#111111")}
+          ${this._colorPair("Active", "styles.active_color", styles.active_color, "#03a9f4")}
+          ${this._colorPair("Active text", "styles.active_text_color", styles.active_text_color, "#ffffff")}
+          ${this._colorPair("Inactive", "styles.inactive_color", styles.inactive_color, "#777777")}
+          ${this._colorPair("Border", "styles.border_color", styles.border_color, "#dddddd")}
+          ${this._colorPair("Badge", "styles.badge_color", styles.badge_color, "#ef4444")}
+        </div>
+        <div class="section">
+          <div class="section-title">Spacing and shape</div>
+          <div class="grid-3">
+            ${this._textField("Card radius", "styles.radius", styles.radius, "12px")}
+            ${this._textField("Tab radius", "styles.tab_radius", styles.tab_radius, "10px")}
+            ${this._textField("Shadow", "styles.shadow", styles.shadow, "none")}
+          </div>
+          <div class="grid-3">
+            ${this._textField("Tab padding", "styles.tab_padding", styles.tab_padding, "9px 12px")}
+            ${this._textField("Header padding", "styles.header_padding", styles.header_padding, "8px")}
+            ${this._textField("Panel padding", "styles.panel_padding", styles.panel_padding, "10px")}
+          </div>
+          <div class="grid-3">
+            ${this._textField("Tab gap", "styles.tab_gap", styles.tab_gap, "6px")}
+            ${this._textField("Content gap", "styles.content_gap", styles.content_gap, "10px")}
+            ${this._textField("Min height", "styles.min_height", styles.min_height, "0px")}
+          </div>
+        </div>
+      `
+    }
+
+    _renderTabsPanel() {
+      const tab = this._config.tabs[this._editingTabIndex]
+      const tabButtons = this._config.tabs
+        .map(
+          (item, index) => `
+            <button type="button" class="tab-chip ${
+              index === this._editingTabIndex ? "active" : ""
+            }" data-action="edit-tab" data-tab-index="${index}">
+              ${escapeHtml(item.attributes.label || "Tab " + String(index + 1))}
+            </button>
+          `
         )
+        .join("")
+
+      return `
+        <div class="section">
+          <div class="toolbar">
+            <button class="action" type="button" data-action="add-tab">Add tab</button>
+            <button class="action" type="button" data-action="duplicate-tab" data-tab-index="${
+              this._editingTabIndex
+            }">Duplicate tab</button>
+            <button class="action danger" type="button" data-action="delete-tab" data-tab-index="${
+              this._editingTabIndex
+            }">Delete tab</button>
+          </div>
+          <div class="tab-list">${tabButtons}</div>
+        </div>
+        <div class="tab-body">
+          <div class="section-title">Selected tab</div>
+          <div class="grid-3">
+            ${this._textField("Label", "tab.label", tab.attributes.label, "Overview", this._editingTabIndex)}
+            ${this._iconField("Icon", "tab.icon", tab.attributes.icon, "mdi:home", this._editingTabIndex)}
+            ${this._textField("Deep-link id", "tab.id", tab.attributes.id, "overview", this._editingTabIndex)}
+          </div>
+          <div class="grid-3">
+            ${this._checkboxField("Hidden", "tab.hidden", tab.attributes.hidden, this._editingTabIndex)}
+            ${this._checkboxField("Disabled", "tab.disabled", tab.attributes.disabled, this._editingTabIndex)}
+            <button class="action" type="button" data-action="make-default" data-tab-index="${
+              this._editingTabIndex
+            }">Make default</button>
+          </div>
+          <div class="grid-3">
+            ${this._colorPair(
+              "Tab accent",
+              "tab.styles.accent_color",
+              tab.styles?.accent_color || "",
+              "#03a9f4",
+              this._editingTabIndex
+            )}
+            ${this._textField(
+              "Panel padding",
+              "tab.styles.panel_padding",
+              tab.styles?.panel_padding || "",
+              "10px",
+              this._editingTabIndex
+            )}
+            ${this._textField(
+              "Panel background",
+              "tab.styles.panel_background",
+              tab.styles?.panel_background || "",
+              "transparent",
+              this._editingTabIndex
+            )}
+          </div>
+        </div>
+        ${this._renderBadgePanel(tab)}
+        ${this._renderConditionsPanel(tab)}
+        ${this._renderCardsPanel(tab)}
+      `
+    }
+
+    _renderBadgePanel(tab) {
+      return `
+        <div class="section">
+          <div class="section-title">Badge</div>
+          <div class="grid-4">
+            ${this._selectField("Mode", "tab.badge.mode", tab.badge.mode, [
+              ["none", "None"],
+              ["dot", "Dot"],
+              ["count", "Count"],
+              ["text", "Text"],
+              ["exclamation", "Exclamation"],
+              ["state", "Entity state"],
+            ], this._editingTabIndex)}
+            ${this._entityField("Entity", "tab.badge.entity", tab.badge.entity, this._editingTabIndex)}
+            ${this._textField("State rule", "tab.badge.state", tab.badge.state, "> 0", this._editingTabIndex)}
+            ${this._textField("Text", "tab.badge.text", tab.badge.text, "!", this._editingTabIndex)}
+          </div>
+          ${this._textField("Template", "tab.badge.template", tab.badge.template, "{{ ... }}", this._editingTabIndex)}
+        </div>
+      `
+    }
+
+    _renderConditionsPanel(tab) {
+      const conditions = tab.conditions.length
+        ? tab.conditions
+            .map((condition, index) => this._renderCondition(condition, index))
+            .join("")
+        : `<div class="muted">No visibility condition. This tab is visible to everyone.</div>`
+
+      return `
+        <div class="section">
+          <div class="section-title">Visibility conditions</div>
+          ${conditions}
+          <button class="action" type="button" data-action="add-condition" data-tab-index="${
+            this._editingTabIndex
+          }">Add condition</button>
+        </div>
+      `
+    }
+
+    _renderCondition(condition, index) {
+      return `
+        <div class="section" data-condition-index="${index}">
+          <div class="grid-4">
+            ${this._selectField("Type", "condition.type", condition.type, [
+              ["entity", "Entity"],
+              ["user", "User"],
+              ["media", "Media query"],
+              ["template", "Template"],
+            ], this._editingTabIndex, undefined, index)}
+            ${this._entityField("Entity", "condition.entity", condition.entity || "", this._editingTabIndex, undefined, index)}
+            ${this._textField("State", "condition.state", condition.state || "", "on or > 0", this._editingTabIndex, undefined, index)}
+            ${this._textField("State not", "condition.state_not", condition.state_not || "", "off", this._editingTabIndex, undefined, index)}
+          </div>
+          <div class="grid-3">
+            ${this._textField("User ids", "condition.user", condition.user || "", "id1,id2", this._editingTabIndex, undefined, index)}
+            ${this._textField("Media query", "condition.media_query", condition.media_query || "", "(max-width: 720px)", this._editingTabIndex, undefined, index)}
+            ${this._textField("Template", "condition.template", condition.template || "", "{{ is_state(...) }}", this._editingTabIndex, undefined, index)}
+          </div>
+          <button class="action danger" type="button" data-action="delete-condition" data-tab-index="${
+            this._editingTabIndex
+          }" data-condition-index="${index}">Remove condition</button>
+        </div>
+      `
+    }
+
+    _renderCardsPanel(tab) {
+      const cards = tab.cards
+        .map((card, index) => this._renderCardItem(card, index))
+        .join("")
+      return `
+        <div class="section">
+          <div class="section-title">Cards in this tab</div>
+          ${cards}
+          <div class="grid-3">
+            ${this._selectField("New card type", "editor.newCardType", this._newCardType, [
+              ["entity", "Entity"],
+              ["entities", "Entities"],
+              ["tile", "Tile"],
+              ["button", "Button"],
+              ["markdown", "Markdown"],
+              ["thermostat", "Thermostat"],
+              ["gauge", "Gauge"],
+              ["glance", "Glance"],
+              ["history", "History graph"],
+            ])}
+            <button class="action" type="button" data-action="add-card" data-tab-index="${
+              this._editingTabIndex
+            }">Add card</button>
+          </div>
+        </div>
+      `
+    }
+
+    _renderCardItem(card, index) {
+      const key = this._nativeKey(this._editingTabIndex, index)
+      const firstEntity = Array.isArray(card.entities) ? card.entities[0] : ""
+      const primaryEntity = card.entity || (isObject(firstEntity) ? firstEntity.entity : firstEntity) || ""
+      return `
+        <div class="card-item" data-card-index="${index}">
+          <div class="card-title">${escapeHtml(summarizeCard(card))}</div>
+          <div class="card-actions">
+            <button class="icon-button" type="button" title="Move up" data-action="move-card-up" data-tab-index="${
+              this._editingTabIndex
+            }" data-card-index="${index}"><ha-icon icon="mdi:arrow-up"></ha-icon></button>
+            <button class="icon-button" type="button" title="Move down" data-action="move-card-down" data-tab-index="${
+              this._editingTabIndex
+            }" data-card-index="${index}"><ha-icon icon="mdi:arrow-down"></ha-icon></button>
+            <button class="action" type="button" data-action="duplicate-card" data-tab-index="${
+              this._editingTabIndex
+            }" data-card-index="${index}">Duplicate</button>
+            <button class="action danger" type="button" data-action="delete-card" data-tab-index="${
+              this._editingTabIndex
+            }" data-card-index="${index}">Delete</button>
+          </div>
+          <div class="grid-3">
+            ${this._textField("Type", "card.type", card.type || "", "entity", this._editingTabIndex, index)}
+            ${this._entityField("Entity", "card.entity", primaryEntity, this._editingTabIndex, index)}
+            ${this._textField("Title/name", "card.title", card.title || card.name || "", "Living room", this._editingTabIndex, index)}
+          </div>
+          <label>
+            Markdown content
+            <textarea data-field="card.content" data-tab-index="${this._editingTabIndex}" data-card-index="${index}">${escapeHtml(
+              card.content || ""
+            )}</textarea>
+          </label>
+          <div class="native-editor-host" id="native-editor-${key}">
+            <div class="muted">Native visual editor loads here when this card type provides one.</div>
+          </div>
+          <details class="advanced-json">
+            <summary>Advanced JSON fallback</summary>
+            <textarea data-field="card.json" data-tab-index="${this._editingTabIndex}" data-card-index="${index}">${escapeHtml(
+              JSON.stringify(card, null, 2)
+            )}</textarea>
+            <div class="error" id="json-error-${key}"></div>
+          </details>
+        </div>
+      `
+    }
+
+    _renderAdvancedPanel() {
+      return `
+        <div class="section">
+          <div class="section-title">Full generated config</div>
+          <div class="muted">This read-only view helps with debugging and sharing, while normal editing stays visual.</div>
+          <textarea readonly>${escapeHtml(JSON.stringify(toPublicConfig(this._config), null, 2))}</textarea>
+        </div>
+      `
+    }
+
+    _textField(label, field, value, placeholder = "", tabIndex, cardIndex, conditionIndex) {
+      return `
+        <label>
+          ${escapeHtml(label)}
+          <input data-field="${field}" ${this._dataAttrs(
+            tabIndex,
+            cardIndex,
+            conditionIndex
+          )} value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" />
+        </label>
+      `
+    }
+
+    _numberField(label, field, value, min = 0) {
+      return `
+        <label>
+          ${escapeHtml(label)}
+          <input type="number" min="${min}" step="1" data-field="${field}" value="${escapeHtml(value)}" />
+        </label>
+      `
+    }
+
+    _checkboxField(label, field, checked, tabIndex) {
+      return `
+        <label class="toggle">
+          <input type="checkbox" data-field="${field}" ${this._dataAttrs(tabIndex)} ${
+            checked ? "checked" : ""
+          } />
+          <span>${escapeHtml(label)}</span>
+        </label>
+      `
+    }
+
+    _selectField(label, field, value, options, tabIndex, cardIndex, conditionIndex) {
+      const optionHtml = options
+        .map(
+          ([optionValue, optionLabel]) =>
+            `<option value="${escapeHtml(optionValue)}" ${
+              optionValue === value ? "selected" : ""
+            }>${escapeHtml(optionLabel)}</option>`
+        )
+        .join("")
+      return `
+        <label>
+          ${escapeHtml(label)}
+          <select data-field="${field}" ${this._dataAttrs(tabIndex, cardIndex, conditionIndex)}>
+            ${optionHtml}
+          </select>
+        </label>
+      `
+    }
+
+    _colorPair(label, field, value, fallback, tabIndex) {
+      const pickerField = field + "__picker"
+      return `
+        <div class="grid-2">
+          <label>
+            ${escapeHtml(label)}
+            <input type="color" data-field="${pickerField}" ${this._dataAttrs(tabIndex)} value="${safeColor(
+              value,
+              fallback
+            )}" />
+          </label>
+          ${this._textField(label + " CSS value", field, value, fallback, tabIndex)}
+        </div>
+      `
+    }
+
+    _entityField(label, field, value, tabIndex, cardIndex, conditionIndex) {
+      return `
+        <label>
+          ${escapeHtml(label)}
+          <ha-entity-picker data-field="${field}" ${this._dataAttrs(
+            tabIndex,
+            cardIndex,
+            conditionIndex
+          )} data-current="${escapeHtml(value)}"></ha-entity-picker>
+          <input data-field="${field}" ${this._dataAttrs(
+            tabIndex,
+            cardIndex,
+            conditionIndex
+          )} value="${escapeHtml(value)}" placeholder="domain.entity" />
+        </label>
+      `
+    }
+
+    _iconField(label, field, value, placeholder, tabIndex) {
+      return `
+        <label>
+          ${escapeHtml(label)}
+          <ha-icon-picker data-field="${field}" data-tab-index="${tabIndex}" data-current="${escapeHtml(
+            value
+          )}"></ha-icon-picker>
+          <input data-field="${field}" data-tab-index="${tabIndex}" value="${escapeHtml(
+            value
+          )}" placeholder="${escapeHtml(placeholder)}" />
+        </label>
+      `
+    }
+
+    _dataAttrs(tabIndex, cardIndex, conditionIndex) {
+      return [
+        tabIndex !== undefined ? `data-tab-index="${tabIndex}"` : "",
+        cardIndex !== undefined ? `data-card-index="${cardIndex}"` : "",
+        conditionIndex !== undefined ? `data-condition-index="${conditionIndex}"` : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    }
+
+    _onRootInput(event) {
+      const target = event.target
+      const field = target?.dataset?.field
+      if (!field || !this._config || target.tagName?.startsWith("HA-")) return
+      if (field.endsWith("__picker")) {
+        const realField = field.replace("__picker", "")
+      this._applyField(realField, target.value, target)
+        this._syncCssValue(realField, target.value)
         this._emit(false)
         return
       }
-
-      if (field.startsWith("styles.") && field.endsWith("_picker")) {
-        const key = field.replace("styles.", "").replace("_picker", "")
-        this._config.styles[key] = event.target.value
-        this._syncTextInput(field, event.target.value)
-        this._emit(false)
-        return
-      }
-
-      if (field.startsWith("styles.")) {
-        const key = field.replace("styles.", "")
-        this._config.styles[key] = event.target.value
-        this._emit(false)
-        return
-      }
-
-      if (!field.startsWith("tab.")) return
-
-      const index = Number(event.target.dataset.index)
-      const tab = this._config.tabs[index]
-      if (!tab) return
-
-      if (field === "tab.label") {
-        tab.attributes.label = event.target.value
-        this._emit(false)
-      }
-
-      if (field === "tab.icon") {
-        tab.attributes.icon = event.target.value
-        this._emit(false)
-      }
-
-      if (field === "tab.style.color") {
-        tab.styles = tab.styles || {}
-        tab.styles.color = event.target.value
-        this._emit(false)
-      }
+      if (field === "card.json") return
+      this._applyField(field, this._targetValue(target), target)
+      this._emit(false)
     }
 
     _onRootChange(event) {
-      const field = event.target?.dataset?.field
+      const target = event.target
+      const field = target?.dataset?.field
+      if (!field || !this._config || target.tagName?.startsWith("HA-")) return
+      if (field.endsWith("__picker")) {
+        const realField = field.replace("__picker", "")
+        this._applyField(realField, target.value, target)
+        this._syncCssValue(realField, target.value)
+        this._emit(false)
+        return
+      }
+      if (field === "card.json") {
+        this._applyCardJson(Number(target.dataset.tabIndex), Number(target.dataset.cardIndex), target.value)
+        return
+      }
+      this._applyField(field, this._targetValue(target), target)
+      this._emit(this._fieldNeedsRender(field))
+    }
+
+    _onValueChanged(event) {
+      const target = event.target
+      const field = target?.dataset?.field
       if (!field || !this._config) return
-
-      if (field === "options.keepAlive") {
-        this._config.options.keepAlive = event.target.checked
-        this._emit(false)
-        return
-      }
-      if (field === "options.lazy") {
-        this._config.options.lazy = event.target.checked
-        this._emit(false)
-        return
-      }
-      if (field === "options.showIcons") {
-        this._config.options.showIcons = event.target.checked
-        this._emit(false)
-        return
-      }
-      if (field === "options.showLabels") {
-        this._config.options.showLabels = event.target.checked
-        this._emit(false)
-        return
-      }
-
-      if (field === "tab.hidden") {
-        const index = Number(event.target.dataset.index)
-        const tab = this._config.tabs[index]
-        if (!tab) return
-        tab.attributes.hidden = event.target.checked
-        this._emit(false)
-        return
-      }
-
-      if (field === "tab.card") {
-        const index = Number(event.target.dataset.index)
-        this._applyCardJson(index, event.target.value)
-      }
+      event.stopPropagation()
+      const value = event.detail?.value ?? target.value ?? ""
+      this._applyField(field, value, target)
+      this._syncDuplicateInputs(target, field, value)
+      this._emit(this._fieldNeedsRender(field))
     }
 
     _onRootClick(event) {
       const action = event.target?.dataset?.action
       if (!action || !this._config) return
+      const tabIndex = Number(event.target.dataset.tabIndex)
+      const cardIndex = Number(event.target.dataset.cardIndex)
+      const conditionIndex = Number(event.target.dataset.conditionIndex)
+
+      if (action === "section") {
+        this._section = event.target.dataset.section
+        this._render()
+        return
+      }
+
+      if (action === "preset") {
+        Object.assign(this._config.styles, STYLE_PRESETS[event.target.dataset.preset] || {})
+        this._emit(true)
+        return
+      }
+
+      if (action === "edit-tab") {
+        this._editingTabIndex = clamp(tabIndex, 0, this._config.tabs.length - 1)
+        this._render()
+        return
+      }
 
       if (action === "add-tab") {
         this._config.tabs.push({
           attributes: {
             label: "New tab",
             icon: "mdi:tab",
+            id: "tab-" + String(this._config.tabs.length + 1),
             hidden: false,
+            disabled: false,
           },
           styles: {},
-          card: {
-            type: "entity",
-            entity: "sun.sun",
-          },
+          conditions: [],
+          badge: normalizeBadge({}),
+          cards: [clone(CARD_TEMPLATES.entity)],
         })
+        this._editingTabIndex = this._config.tabs.length - 1
         this._emit(true)
         return
       }
 
-      const index = Number(event.target.dataset.index)
-      if (!Number.isFinite(index)) return
+      if (action === "duplicate-tab") {
+        const copy = clone(this._config.tabs[tabIndex])
+        copy.attributes.label += " copy"
+        copy.attributes.id = slugify(copy.attributes.label, "tab-" + String(this._config.tabs.length + 1))
+        this._config.tabs.splice(tabIndex + 1, 0, copy)
+        this._editingTabIndex = tabIndex + 1
+        this._emit(true)
+        return
+      }
 
       if (action === "delete-tab") {
         if (this._config.tabs.length <= 1) return
-        this._config.tabs.splice(index, 1)
-        this._nativeEditors.delete(index)
+        this._config.tabs.splice(tabIndex, 1)
+        this._editingTabIndex = clamp(tabIndex, 0, this._config.tabs.length - 1)
         this._emit(true)
         return
       }
 
-      if (action === "move-up" && index > 0) {
-        const tmp = this._config.tabs[index - 1]
-        this._config.tabs[index - 1] = this._config.tabs[index]
-        this._config.tabs[index] = tmp
+      if (action === "make-default") {
+        this._config.options.defaultTabIndex = tabIndex
+        this._config.options.defaultTabId = this._config.tabs[tabIndex].attributes.id
         this._emit(true)
         return
       }
 
-      if (action === "move-down" && index < this._config.tabs.length - 1) {
-        const tmp = this._config.tabs[index + 1]
-        this._config.tabs[index + 1] = this._config.tabs[index]
-        this._config.tabs[index] = tmp
+      if (action === "add-condition") {
+        this._config.tabs[tabIndex].conditions.push({
+          type: "entity",
+          entity: "",
+          attribute: "",
+          state: "on",
+          state_not: "",
+          above: "",
+          below: "",
+        })
+        this._emit(true)
+        return
+      }
+
+      if (action === "delete-condition") {
+        this._config.tabs[tabIndex].conditions.splice(conditionIndex, 1)
+        this._emit(true)
+        return
+      }
+
+      if (action === "add-card") {
+        const template = CARD_TEMPLATES[this._newCardType] || CARD_TEMPLATES.entity
+        this._config.tabs[tabIndex].cards.push(clone(template))
+        this._emit(true)
+        return
+      }
+
+      if (action === "delete-card") {
+        const cards = this._config.tabs[tabIndex].cards
+        if (cards.length <= 1) return
+        cards.splice(cardIndex, 1)
+        this._emit(true)
+        return
+      }
+
+      if (action === "duplicate-card") {
+        const cards = this._config.tabs[tabIndex].cards
+        cards.splice(cardIndex + 1, 0, clone(cards[cardIndex]))
+        this._emit(true)
+        return
+      }
+
+      if (action === "move-card-up" && cardIndex > 0) {
+        this._swap(this._config.tabs[tabIndex].cards, cardIndex, cardIndex - 1)
+        this._emit(true)
+        return
+      }
+
+      if (action === "move-card-down" && cardIndex < this._config.tabs[tabIndex].cards.length - 1) {
+        this._swap(this._config.tabs[tabIndex].cards, cardIndex, cardIndex + 1)
         this._emit(true)
       }
+    }
+
+    _targetValue(target) {
+      if (target.type === "checkbox") return target.checked
+      if (target.type === "number") return toNumber(target.value, 0)
+      return target.value
+    }
+
+    _fieldNeedsRender(field) {
+      return (
+        field === "editor.newCardType" ||
+        field === "card.type" ||
+        field === "condition.type" ||
+        field === "tab.badge.mode"
+      )
+    }
+
+    _applyField(field, value, target) {
+      if (field === "editor.newCardType") {
+        this._newCardType = value
+        return
+      }
+
+      if (field.startsWith("options.")) {
+        const key = field.slice(8)
+        this._config.options[key] = value
+        if (key === "defaultTabIndex") {
+          this._config.options.defaultTabIndex = clamp(
+            toNumber(value, 0),
+            0,
+            this._config.tabs.length - 1
+          )
+        }
+        return
+      }
+
+      if (field.startsWith("styles.")) {
+        this._config.styles[field.slice(7)] = value
+        return
+      }
+
+      const tabIndex = Number(target?.dataset?.tabIndex)
+      const cardIndex = Number(target?.dataset?.cardIndex)
+      const conditionIndex = Number(target?.dataset?.conditionIndex)
+      const tab = this._config.tabs[Number.isFinite(tabIndex) ? tabIndex : this._editingTabIndex]
+      if (!tab) return
+
+      if (field.startsWith("tab.styles.")) {
+        tab.styles = tab.styles || {}
+        tab.styles[field.slice(11)] = value
+        return
+      }
+
+      if (field.startsWith("tab.badge.")) {
+        tab.badge[field.slice(10)] = value
+        return
+      }
+
+      if (field === "tab.label") {
+        tab.attributes.label = value
+        return
+      }
+      if (field === "tab.icon") {
+        tab.attributes.icon = value
+        return
+      }
+      if (field === "tab.id") {
+        tab.attributes.id = slugify(value, tab.attributes.id || "tab")
+        return
+      }
+      if (field === "tab.hidden") {
+        tab.attributes.hidden = value
+        return
+      }
+      if (field === "tab.disabled") {
+        tab.attributes.disabled = value
+        return
+      }
+
+      if (field.startsWith("condition.")) {
+        const condition = tab.conditions[conditionIndex]
+        if (!condition) return
+        condition[field.slice(10)] = value
+        return
+      }
+
+      if (field.startsWith("card.")) {
+        const card = tab.cards[cardIndex]
+        if (!card) return
+        const key = field.slice(5)
+        if (key === "title") {
+          card.title = value
+          if ("name" in card) card.name = value
+        } else if (key === "entity" && Array.isArray(card.entities)) {
+          card.entities = value ? [value] : []
+        } else {
+          card[key] = value
+        }
+      }
+    }
+
+    _syncCssValue(field, value) {
+      const input = this.shadowRoot.querySelector(`input[data-field="${field}"]`)
+      if (input) input.value = value
+    }
+
+    _syncDuplicateInputs(source, field, value) {
+      const selector = [
+        `[data-field="${field}"]`,
+        source.dataset.tabIndex !== undefined ? `[data-tab-index="${source.dataset.tabIndex}"]` : "",
+        source.dataset.cardIndex !== undefined ? `[data-card-index="${source.dataset.cardIndex}"]` : "",
+        source.dataset.conditionIndex !== undefined
+          ? `[data-condition-index="${source.dataset.conditionIndex}"]`
+          : "",
+      ].join("")
+      this.shadowRoot.querySelectorAll(selector).forEach((input) => {
+        if (input !== source && "value" in input) input.value = value
+      })
+    }
+
+    _applyCardJson(tabIndex, cardIndex, rawValue) {
+      const key = this._nativeKey(tabIndex, cardIndex)
+      const error = this.shadowRoot.getElementById("json-error-" + key)
+      try {
+        const parsed = JSON.parse(rawValue)
+        if (!isObject(parsed) || !parsed.type) {
+          throw new Error("Card JSON must be an object with a type field.")
+        }
+        this._config.tabs[tabIndex].cards[cardIndex] = parsed
+        if (error) error.textContent = ""
+        this._emit(true)
+      } catch (err) {
+        if (error) error.textContent = err.message
+      }
+    }
+
+    _swap(items, a, b) {
+      const tmp = items[a]
+      items[a] = items[b]
+      items[b] = tmp
     }
 
     _emit(reRender) {
-      dispatchConfigChanged(this, clone(this._config))
-      if (reRender) {
-        this._render()
-      }
+      this._editingTabIndex = clamp(this._editingTabIndex, 0, this._config.tabs.length - 1)
+      dispatchConfigChanged(this, toPublicConfig(this._config))
+      if (reRender) this._render()
     }
 
-    _syncTextInput(fieldPicker, value) {
-      const fieldText = fieldPicker.replace("_picker", "")
-      const textInput = this.shadowRoot.querySelector(`[data-field="${fieldText}"]`)
-      if (textInput) {
-        textInput.value = value
-      }
-    }
-
-    _applyCardJson(index, rawValue) {
-      const error = this.shadowRoot.getElementById("json-error-" + index)
-      try {
-        const parsed = JSON.parse(rawValue)
-        if (!parsed || typeof parsed !== "object" || !parsed.type) {
-          throw new Error("Card JSON must be an object with a 'type' field.")
-        }
-        this._config.tabs[index].card = parsed
-        if (error) {
-          error.textContent = ""
-          error.classList.remove("error")
-        }
-
-        const editor = this._nativeEditors.get(index)
-        if (editor) {
-          try {
-            editor.setConfig(parsed)
-          } catch (_) {}
-        }
-
-        this._emit(false)
-      } catch (err) {
-        if (error) {
-          error.textContent = err.message
-          error.classList.add("error")
-        }
-      }
+    _hydrateHaControls() {
+      if (!this.shadowRoot) return
+      this.shadowRoot.querySelectorAll("ha-entity-picker, ha-icon-picker").forEach((picker) => {
+        picker.hass = this._hass
+        picker.value = picker.dataset.current || picker.value || ""
+        picker.allowCustomEntity = true
+      })
+      this._nativeEditors.forEach((editor) => {
+        editor.hass = this._hass
+      })
     }
 
     async _mountNativeEditors() {
-      if (!this._config || !this.shadowRoot) return
-
-      for (let index = 0; index < this._config.tabs.length; index += 1) {
-        const host = this.shadowRoot.getElementById("native-editor-" + index)
-        if (!host) continue
-
-        const existing = this._nativeEditors.get(index)
-        if (existing) {
-          existing.hass = this._hass
-          if (!host.contains(existing)) {
-            host.appendChild(existing)
-          }
-          continue
-        }
-
-        if (this._loadingEditor.has(index)) continue
-        this._loadingEditor.add(index)
-
-        this._createNativeEditor(index)
-          .then((editor) => {
-            this._loadingEditor.delete(index)
-            if (!editor) return
-            this._nativeEditors.set(index, editor)
-            const freshHost = this.shadowRoot.getElementById("native-editor-" + index)
-            if (freshHost && !freshHost.contains(editor)) {
-              freshHost.appendChild(editor)
-            }
-          })
-          .catch(() => {
-            this._loadingEditor.delete(index)
-          })
+      const tab = this._config.tabs[this._editingTabIndex]
+      if (!tab) return
+      for (let cardIndex = 0; cardIndex < tab.cards.length; cardIndex += 1) {
+        const key = this._nativeKey(this._editingTabIndex, cardIndex)
+        const host = this.shadowRoot.getElementById("native-editor-" + key)
+        if (!host || this._loadingEditors.has(key)) continue
+        this._loadingEditors.add(key)
+        const editor = await this._createNativeEditor(this._editingTabIndex, cardIndex)
+        this._loadingEditors.delete(key)
+        if (!editor) continue
+        this._nativeEditors.set(key, editor)
+        host.replaceChildren(editor)
       }
     }
 
-    async _createNativeEditor(index) {
-      const tab = this._config.tabs[index]
-      if (!tab?.card?.type) return null
-
-      const cardType = tab.card.type
-      const isCustom = cardType.startsWith("custom:")
-      const tagName = isCustom ? cardType.slice(7) : "hui-" + cardType + "-card"
-
+    async _createNativeEditor(tabIndex, cardIndex) {
+      const card = this._config.tabs[tabIndex]?.cards[cardIndex]
+      if (!card?.type || !window.loadCardHelpers) return null
+      const tagName = getCardTagName(card.type)
       try {
-        const helpers = await Promise.race([
-          window.loadCardHelpers(),
-          new Promise((_, reject) => {
-            setTimeout(() => reject(new Error("loadCardHelpers timeout")), 5000)
-          }),
-        ])
-
+        const helpers = await window.loadCardHelpers()
         try {
-          helpers.createCardElement({ type: cardType })
+          await helpers.createCardElement(card)
         } catch (_) {}
-
-        if (!customElements.get(tagName)) {
+        if (tagName && !customElements.get(tagName)) {
           await Promise.race([
             customElements.whenDefined(tagName),
-            new Promise((resolve) => setTimeout(resolve, 3000)),
+            new Promise((resolve) => window.setTimeout(resolve, 1500)),
           ])
         }
-
         const cardClass = customElements.get(tagName)
-        if (!cardClass || typeof cardClass.getConfigElement !== "function") {
-          return null
-        }
-
+        if (!cardClass || typeof cardClass.getConfigElement !== "function") return null
         const maybeEditor = cardClass.getConfigElement()
         const editor =
-          maybeEditor instanceof Promise
-            ? await Promise.race([
-                maybeEditor,
-                new Promise((_, reject) => {
-                  setTimeout(() => reject(new Error("getConfigElement timeout")), 3000)
-                }),
-              ])
-            : maybeEditor
-
-        if (!editor) return null
-
-        if (this._hass) editor.hass = this._hass
-        try {
-          const lovelace = document
-            .querySelector("home-assistant")
-            ?.shadowRoot?.querySelector("home-assistant-main")
-            ?.shadowRoot?.querySelector("ha-panel-lovelace")?.lovelace
-          if (lovelace) {
-            editor.lovelace = lovelace
-          }
-        } catch (_) {}
-
-        editor.setConfig(tab.card)
-        editor.addEventListener("config-changed", (ev) => {
-          ev.stopPropagation()
-          const nextConfig = ev.detail?.config
-          if (!nextConfig || typeof nextConfig !== "object") return
-          this._config.tabs[index].card = clone(nextConfig)
-
+          maybeEditor && typeof maybeEditor.then === "function" ? await maybeEditor : maybeEditor
+        if (!editor || typeof editor.setConfig !== "function") return null
+        editor.hass = this._hass
+        const lovelace = getLovelace()
+        if (lovelace) editor.lovelace = lovelace
+        editor.setConfig(card)
+        editor.addEventListener("config-changed", (event) => {
+          event.stopPropagation()
+          const nextConfig = event.detail?.config
+          if (!isObject(nextConfig)) return
+          this._config.tabs[tabIndex].cards[cardIndex] = clone(nextConfig)
+          dispatchConfigChanged(this, toPublicConfig(this._config))
           const textarea = this.shadowRoot.querySelector(
-            `textarea[data-field="tab.card"][data-index="${index}"]`
+            `textarea[data-field="card.json"][data-tab-index="${tabIndex}"][data-card-index="${cardIndex}"]`
           )
-          if (textarea) {
-            textarea.value = JSON.stringify(nextConfig, null, 2)
-          }
-
-          dispatchConfigChanged(this, clone(this._config))
+          if (textarea) textarea.value = JSON.stringify(nextConfig, null, 2)
         })
-
         return editor
       } catch (_) {
         return null
       }
     }
 
-    _safeColor(value, fallback) {
-      if (typeof value === "string" && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value.trim())) {
-        const normalized = value.trim()
-        if (normalized.length === 4) {
-          const r = normalized[1]
-          const g = normalized[2]
-          const b = normalized[3]
-          return "#" + r + r + g + g + b + b
-        }
-        return normalized
-      }
-      return fallback
-    }
-
-    _escape(value) {
-      return String(value ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#39;")
+    _nativeKey(tabIndex, cardIndex) {
+      return String(tabIndex) + "-" + String(cardIndex)
     }
   }
 
   if (!customElements.get(CARD_TYPE)) {
     customElements.define(CARD_TYPE, TabbedCard)
   }
-  if (!customElements.get("ultimate-tabbed-card")) {
-    customElements.define("ultimate-tabbed-card", TabbedCard)
+  if (!customElements.get(ALT_CARD_TYPE)) {
+    customElements.define(ALT_CARD_TYPE, TabbedCard)
   }
   if (!customElements.get(CARD_EDITOR_TYPE)) {
     customElements.define(CARD_EDITOR_TYPE, TabbedCardEditor)
   }
+  if (!customElements.get(ALT_CARD_EDITOR_TYPE)) {
+    customElements.define(ALT_CARD_EDITOR_TYPE, TabbedCardEditor)
+  }
 
   window.customCards = window.customCards || []
-  if (!window.customCards.some((entry) => entry?.type === CARD_TYPE)) {
-    window.customCards.push({
+  const registrations = [
+    {
       type: CARD_TYPE,
       name: "Ultimate Tabbed Card",
-      description:
-        "High-performance tabbed container card with lazy rendering and full visual editor.",
-    })
-  }
+      description: "Fast visual tabbed container with nested card editors, conditions, badges and deep links.",
+    },
+    {
+      type: ALT_CARD_TYPE,
+      name: "Ultimate Tabbed Card",
+      description: "Alias for custom:tabbed-card.",
+    },
+  ]
+  registrations.forEach((registration) => {
+    const existing = window.customCards.find((entry) => entry?.type === registration.type)
+    if (!existing) {
+      window.customCards.push({
+        ...registration,
+        preview: true,
+        documentationURL: "https://github.com/Micpi/ultimate-tabbed-card",
+        getEntitySuggestion: (_hass, entityId) => {
+          if (!entityId) return null
+          return {
+            config: {
+              type: "custom:" + registration.type,
+              tabs: [
+                {
+                  attributes: {
+                    label: "Entity",
+                    icon: "mdi:card",
+                    id: "entity",
+                  },
+                  card: {
+                    type: "tile",
+                    entity: entityId,
+                  },
+                },
+              ],
+            },
+          }
+        },
+      })
+    }
+  })
+
+  console.info(
+    "%cULTIMATE-TABBED-CARD " + VERSION,
+    "color: var(--primary-color); font-weight: 700"
+  )
 })()
