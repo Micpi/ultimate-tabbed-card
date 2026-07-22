@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.0"
+  const VERSION = "0.3.1"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -2774,17 +2774,20 @@
     }
   }
 
+  class UltimateTabbedCard extends TabbedCard {}
+  class UltimateTabbedCardEditor extends TabbedCardEditor {}
+
   if (!customElements.get(CARD_TYPE)) {
     customElements.define(CARD_TYPE, TabbedCard)
   }
   if (!customElements.get(ALT_CARD_TYPE)) {
-    customElements.define(ALT_CARD_TYPE, TabbedCard)
+    customElements.define(ALT_CARD_TYPE, UltimateTabbedCard)
   }
   if (!customElements.get(CARD_EDITOR_TYPE)) {
     customElements.define(CARD_EDITOR_TYPE, TabbedCardEditor)
   }
   if (!customElements.get(ALT_CARD_EDITOR_TYPE)) {
-    customElements.define(ALT_CARD_EDITOR_TYPE, TabbedCardEditor)
+    customElements.define(ALT_CARD_EDITOR_TYPE, UltimateTabbedCardEditor)
   }
 
   window.customCards = window.customCards || []
