@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.12"
+  const VERSION = "0.3.13"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -17,7 +17,7 @@
     showIcons: true,
     showLabels: true,
     hideInactiveLabels: false,
-    remember: "none",
+    remember: "browser",
     storageKey: "",
     deepLink: true,
     updateHash: false,
@@ -568,7 +568,7 @@
       DEFAULT_OPTIONS.defaultTabIndex
     )
     const rememberSource =
-      optionsSource.remember ?? optionsSource.rememberTab ?? optionsSource.remember_tab ?? "none"
+      optionsSource.remember ?? optionsSource.rememberTab ?? optionsSource.remember_tab ?? DEFAULT_OPTIONS.remember
     const rememberMode =
       rememberSource === true ? "card" : rememberSource === false ? "none" : asString(rememberSource, "none")
 
@@ -847,6 +847,7 @@
           keepAlive: true,
           lazy: true,
           preload: "active",
+          remember: "browser",
           showIcons: true,
           showLabels: true,
           swipe: true,
@@ -1109,9 +1110,21 @@
       const key = this._storageKey()
       if (!key) return -1
       try {
-        const stored = Number(window.localStorage.getItem(key))
-        if (Number.isFinite(stored) && stored >= 0 && stored < this._config.tabs.length) {
-          return stored
+        const raw = window.localStorage.getItem(key)
+        if (!raw) return -1
+        const parsed = raw.trim().startsWith("{") ? JSON.parse(raw) : Number(raw)
+        if (isObject(parsed)) {
+          if (parsed.id) {
+            const byId = this._config.tabs.findIndex((tab) => tab.attributes.id === parsed.id)
+            if (byId !== -1) return byId
+          }
+          if (Number.isFinite(parsed.index) && parsed.index >= 0 && parsed.index < this._config.tabs.length) {
+            return parsed.index
+          }
+          return -1
+        }
+        if (Number.isFinite(parsed) && parsed >= 0 && parsed < this._config.tabs.length) {
+          return parsed
         }
       } catch (_) {}
       return -1
@@ -1121,7 +1134,14 @@
       const key = this._storageKey()
       if (!key) return
       try {
-        window.localStorage.setItem(key, String(index))
+        window.localStorage.setItem(
+          key,
+          JSON.stringify({
+            index,
+            id: this._config.tabs[index]?.attributes?.id || "",
+            at: Date.now(),
+          })
+        )
       } catch (_) {}
     }
 
@@ -2683,10 +2703,10 @@
                 {
                   name: "remember",
                   selector: select([
-                    ["none", "None"],
-                    ["card", "This card"],
                     ["browser", "Per browser path"],
                     ["user", "Per Home Assistant user"],
+                    ["card", "This card"],
+                    ["none", "None"],
                   ]),
                 },
                 {
@@ -3005,6 +3025,7 @@
     _computeFormHelper(schema) {
       const helpers = {
         defaultTabId: "Use the tab deep-link id when you prefer a stable default.",
+        remember: "Per browser path remembers the last selected tab on this device and dashboard page.",
         maxCachedTabs: "0 keeps every opened tab cached.",
         hashPrefix: "Optional prefix used before tab ids in the URL hash.",
         template: "Home Assistant template returning true/text, depending on the field.",

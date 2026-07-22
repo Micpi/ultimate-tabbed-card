@@ -92,7 +92,7 @@ options:
   keepAlive: true
   preload: active
   maxCachedTabs: 0
-  remember: card
+  remember: browser
   deepLink: true
   updateHash: false
   swipe: true
@@ -156,7 +156,7 @@ type: custom:ultimate-tabbed-card
 | `showIcons` | boolean | `true` | Shows tab icons when configured. |
 | `showLabels` | boolean | `true` | Shows tab labels. |
 | `hideInactiveLabels` | boolean | `false` | Hides labels on inactive tabs, useful for compact mobile layouts. |
-| `remember` | `none`, `card`, `browser`, `user` | `none` | Persists selected tab after navigation/reload. `none` always falls back to default on a fresh load. |
+| `remember` | `none`, `card`, `browser`, `user` | `browser` | Persists the last selected tab after navigation/reload. `browser` remembers per device and dashboard path. `none` always falls back to default on a fresh load. |
 | `storageKey` | string | `""` | Custom key for remembered tab state. Useful when multiple cards have similar tab ids. |
 | `deepLink` | boolean | `true` | Allows URL hash selection when the hash belongs to this card. |
 | `updateHash` | boolean | `false` | Updates the browser hash when a tab is selected. |
@@ -384,6 +384,15 @@ conditions:
 ```
 
 ### Deep Links And Memory
+
+The default memory mode for new cards is:
+
+```yaml
+options:
+  remember: browser
+```
+
+This stores the last selected tab in browser/app local storage for the current Lovelace path. Existing cards created with older releases may still contain `remember: none`; change `General > Remember tab` to `Per browser path` in the visual editor to enable last-tab memory for those cards.
 
 For predictable dashboards, use unique tab ids:
 
