@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.9"
+  const VERSION = "0.3.10"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -897,19 +897,26 @@
     }
 
     setConfig(config) {
+      const hadConfig = Boolean(this._config)
+      const previousIndex = this._selectedIndex
+      const previousId = this._config?.tabs?.[previousIndex]?.attributes?.id || ""
       this._config = normalizeConfig(config)
       this._renderVersion += 1
       this._helpersPromise = window.loadCardHelpers
         ? window.loadCardHelpers()
         : Promise.reject(new Error("window.loadCardHelpers is not available."))
-      this._selectedIndex = this._resolveInitialIndex()
+      this._selectedIndex = this._resolveInitialIndex({
+        preserveCurrent: hadConfig,
+        previousIndex,
+        previousId,
+      })
       this._activeCardIndex = -1
       this._cardCache.clear()
       this._cardCreation.clear()
       this._cacheOrder = []
       this._renderShell()
       this._refreshVisibleTabs()
-      this._activateTab(this._selectedIndex, { force: true, silent: true })
+      this._activateSelectedTab({ force: true, silent: true })
       if (this._config.options.preload === "all") {
         this._warmupAllTabs()
       } else if (this._config.options.preload === "idle") {
@@ -961,36 +968,49 @@
       if (!this._config) return
       if (!this.shadowRoot.innerHTML) this._renderShell()
       this._refreshVisibleTabs()
-      this._activateTab(this._selectedIndex, { force: true, silent: true })
+      this._activateSelectedTab({ force: true, silent: true })
     }
 
     disconnectedCallback() {
       this._touchStart = null
     }
 
-    _resolveInitialIndex() {
+    _resolveInitialIndex(options = {}) {
       if (!this._config) return 0
-      const { options, tabs } = this._config
+      const { tabs } = this._config
+      if (options.preserveCurrent) {
+        if (options.previousId) {
+          const byId = tabs.findIndex((tab) => tab.attributes.id === options.previousId)
+          if (byId !== -1) return byId
+        }
+        if (Number.isFinite(options.previousIndex) && options.previousIndex >= 0) {
+          return clamp(options.previousIndex, 0, tabs.length - 1)
+        }
+      }
+
+      const { options: cardOptions } = this._config
       const hashIndex = this._getIndexFromHash()
       if (hashIndex !== -1) return hashIndex
 
       const remembered = this._readRememberedIndex()
       if (remembered !== -1) return remembered
 
-      if (options.defaultTabId) {
-        const byId = tabs.findIndex((tab) => tab.attributes.id === options.defaultTabId)
+      if (cardOptions.defaultTabId) {
+        const byId = tabs.findIndex((tab) => tab.attributes.id === cardOptions.defaultTabId)
         if (byId !== -1) return byId
       }
 
-      return clamp(options.defaultTabIndex, 0, tabs.length - 1)
+      return clamp(cardOptions.defaultTabIndex, 0, tabs.length - 1)
     }
 
     _getIndexFromHash() {
       if (!this._config?.options.deepLink) return -1
+      const prefix = this._config.options.hashPrefix || ""
+      if (!prefix && !this._config.options.updateHash) return -1
       const rawHash = decodeURIComponent((window.location.hash || "").replace(/^#/, ""))
       if (!rawHash) return -1
-      const prefix = this._config.options.hashPrefix || ""
-      const tabId = prefix && rawHash.startsWith(prefix) ? rawHash.slice(prefix.length) : rawHash
+      if (prefix && !rawHash.startsWith(prefix)) return -1
+      const tabId = prefix ? rawHash.slice(prefix.length) : rawHash
       return this._config.tabs.findIndex((tab) => tab.attributes.id === tabId)
     }
 
@@ -1422,24 +1442,63 @@
         .map((tab, index) => (this._isTabVisible(tab) ? index : -1))
         .filter((index) => index !== -1)
 
+      let selectedChanged = false
       if (
         this._config.options.autoSelectFirstVisible &&
         (!this._visibleIndices.includes(this._selectedIndex) ||
           this._config.tabs[this._selectedIndex]?.attributes.disabled)
       ) {
-        const next = this._visibleIndices.find((index) => !this._config.tabs[index].attributes.disabled)
-        if (next !== undefined && next !== this._selectedIndex) {
+        const next = this._resolveSelectableIndex(this._selectedIndex)
+        if (next !== -1 && next !== this._selectedIndex) {
           this._selectedIndex = next
-          if (this._activeCardIndex !== -1) {
-            this._activateTab(next, { force: true, silent: true })
-          }
+          selectedChanged = true
         }
       }
 
       this._scheduleTabsRender()
       if (!this._visibleIndices.length) {
         this._renderEmptyPanel("No visible tabs match the current conditions.")
+        return
       }
+      this._removePanelMessages()
+      if (selectedChanged && this._activeCardIndex !== -1) {
+        this._activateSelectedTab({ force: true, silent: true })
+      }
+    }
+
+    _resolveSelectableIndex(preferredIndex = this._selectedIndex) {
+      if (!this._config) return -1
+      const visible = this._visibleIndices.length
+        ? this._visibleIndices
+        : this._config.tabs
+            .map((tab, index) => (this._isTabVisible(tab) ? index : -1))
+            .filter((index) => index !== -1)
+      const enabled = visible.filter((index) => !this._config.tabs[index]?.attributes.disabled)
+      if (!enabled.length) return -1
+      const preferredNumber = Number(preferredIndex)
+      const preferred = Number.isFinite(preferredNumber)
+        ? clamp(preferredNumber, 0, this._config.tabs.length - 1)
+        : -1
+      if (enabled.includes(preferred)) return preferred
+      if (this._config.options.defaultTabId) {
+        const defaultById = this._config.tabs.findIndex(
+          (tab) => tab.attributes.id === this._config.options.defaultTabId
+        )
+        if (enabled.includes(defaultById)) return defaultById
+      }
+      const defaultByIndex = clamp(this._config.options.defaultTabIndex, 0, this._config.tabs.length - 1)
+      if (enabled.includes(defaultByIndex)) return defaultByIndex
+      return enabled[0]
+    }
+
+    _activateSelectedTab(options = {}) {
+      const next = this._resolveSelectableIndex(this._selectedIndex)
+      if (next === -1) {
+        this._renderEmptyPanel("No enabled tabs are available.")
+        return Promise.resolve()
+      }
+      this._selectedIndex = next
+      return this._activateTab(next, options)
     }
 
     _renderTabsOnly() {
@@ -1512,6 +1571,13 @@
       panel.replaceChildren(empty)
     }
 
+    _removePanelMessages() {
+      const panel = this.shadowRoot?.querySelector(".panel")
+      Array.from(panel?.children || []).forEach((child) => {
+        if (child.classList?.contains("empty") && !child.classList.contains("pane")) child.remove()
+      })
+    }
+
     _onTabClick(event) {
       const button = event.target.closest(".tab-btn")
       if (!button || button.disabled) return
@@ -1582,7 +1648,12 @@
           this._cardCreation.set(clamped, creation)
         }
         entry = await creation
-        if (renderVersion !== this._renderVersion || activationToken !== this._activationToken) return
+        if (
+          renderVersion !== this._renderVersion ||
+          (activationToken !== this._activationToken && clamped !== this._selectedIndex)
+        ) {
+          return
+        }
         if (!this._cardCache.has(clamped)) {
           this._cardCache.set(clamped, entry)
           panel.appendChild(entry.pane)
@@ -1591,7 +1662,7 @@
         }
       }
 
-      if (activationToken !== this._activationToken) return
+      if (activationToken !== this._activationToken && clamped !== this._selectedIndex) return
       if (entry?.pane && !entry.pane.isConnected) panel.appendChild(entry.pane)
       entry.lastUsed = Date.now()
       this._syncPaneVisibility(clamped)
