@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.2"
+  const VERSION = "0.3.3"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -62,16 +62,16 @@
   }
 
   const CARD_TEMPLATES = {
-    entity: { type: "entity", entity: "sun.sun" },
-    entities: { type: "entities", entities: ["sun.sun"] },
-    tile: { type: "tile", entity: "sun.sun" },
-    button: { type: "button", entity: "sun.sun", show_state: true },
+    entity: { type: "entity" },
+    entities: { type: "entities", entities: [] },
+    tile: { type: "tile" },
+    button: { type: "button", show_state: true },
     markdown: { type: "markdown", content: "Content" },
-    thermostat: { type: "thermostat", entity: "climate.home" },
-    gauge: { type: "gauge", entity: "sensor.home_temperature", min: 0, max: 40 },
-    glance: { type: "glance", entities: ["sun.sun"] },
-    history: { type: "history-graph", entities: ["sun.sun"] },
-    "history-graph": { type: "history-graph", entities: ["sun.sun"] },
+    thermostat: { type: "thermostat" },
+    gauge: { type: "gauge", min: 0, max: 40 },
+    glance: { type: "glance", entities: [] },
+    history: { type: "history-graph", entities: [] },
+    "history-graph": { type: "history-graph", entities: [] },
   }
 
   const STYLE_PRESETS = {
@@ -166,6 +166,14 @@
         composed: true,
       })
     )
+  }
+
+  function serializeConfig(config) {
+    try {
+      return JSON.stringify(config)
+    } catch (_) {
+      return ""
+    }
   }
 
   function escapeHtml(value) {
@@ -268,10 +276,6 @@
   function normalizeTab(tab, index) {
     const label = asString(resolveTabLabel(tab, index), "Tab " + String(index + 1))
     const cards = normalizeCards(tab)
-    if (!cards.length) {
-      throw new Error("Tabbed Card: each tab must contain a card or cards configuration.")
-    }
-
     const attr = tab?.attributes || {}
     const styles = isObject(tab?.styles) ? clone(tab.styles) : {}
 
@@ -452,7 +456,9 @@
           conditions: clone(tab.conditions),
           badge: clone(tab.badge),
         }
-        if (tab.cards.length === 1) {
+        if (!tab.cards.length) {
+          publicTab.cards = []
+        } else if (tab.cards.length === 1) {
           publicTab.card = clone(tab.cards[0])
         } else {
           publicTab.cards = clone(tab.cards)
@@ -567,10 +573,7 @@
               icon: "mdi:view-dashboard",
               id: "overview",
             },
-            card: {
-              type: "entity",
-              entity: "sun.sun",
-            },
+            cards: [],
           },
           {
             attributes: {
@@ -1009,7 +1012,14 @@
             min-width: 0;
           }
 
-          .empty,
+          .empty {
+            border: 1px dashed var(--divider-color);
+            border-radius: 10px;
+            padding: 10px;
+            color: var(--secondary-text-color);
+            background: rgba(127, 127, 127, 0.08);
+          }
+
           .error {
             border: 1px solid var(--error-color, #ef4444);
             border-radius: 10px;
@@ -1321,6 +1331,14 @@
       if (tab.styles?.panel_padding) pane.style.padding = tab.styles.panel_padding
 
       const cards = []
+      if (!tab.cards.length) {
+        const empty = document.createElement("div")
+        empty.className = "empty"
+        empty.textContent = "No cards in this tab yet."
+        pane.appendChild(empty)
+        return { pane, cards, lastUsed: Date.now() }
+      }
+
       const parent = tab.cards.length > 1 ? document.createElement("div") : pane
       if (parent !== pane) {
         parent.className = "card-stack"
@@ -1649,6 +1667,14 @@
       this._nativeEditors = new Map()
       this._loadingEditors = new Set()
       this._newCardType = "entity"
+      this._nativeMountToken = 0
+      this._renderPending = false
+      this._lastEmittedConfigText = ""
+      this._schemaCache = new Map()
+      this._schemaCacheSignature = ""
+      this._pickerDefinitionWait = false
+      this._boundComputeLabel = this._computeFormLabel.bind(this)
+      this._boundComputeHelper = this._computeFormHelper.bind(this)
 
       this._onRootChange = this._onRootChange.bind(this)
       this._onRootClick = this._onRootClick.bind(this)
@@ -1657,23 +1683,21 @@
 
     set hass(hass) {
       this._hass = hass
-      this._hydrateHaControls()
-      this._mountCardPicker()
-      this._nativeEditors.forEach((editor) => {
-        editor.hass = hass
-      })
+      this._syncHassToChildren()
     }
 
     set lovelace(lovelace) {
       this._lovelace = lovelace
-      this._hydrateHaControls()
+      this._syncLovelaceToChildren()
       this._mountCardPicker()
-      this._nativeEditors.forEach((editor) => {
-        editor.lovelace = lovelace
-      })
     }
 
     setConfig(config) {
+      const incomingConfigText = serializeConfig(config)
+      if (this._config && incomingConfigText && incomingConfigText === this._lastEmittedConfigText) {
+        this._lastEmittedConfigText = ""
+        return
+      }
       try {
         this._config = normalizeConfig(config)
       } catch (_) {
@@ -1685,6 +1709,8 @@
 
     _render() {
       if (!this._config) return
+      this._renderPending = false
+      this._nativeMountToken += 1
       this._nativeEditors.clear()
       this._loadingEditors.clear()
       this.shadowRoot.innerHTML = `
@@ -1888,6 +1914,10 @@
             gap: 8px;
           }
 
+          .card-picker-frame.has-native-picker .fallback-picker {
+            display: none;
+          }
+
           .advanced-json summary {
             cursor: pointer;
             color: var(--secondary-text-color);
@@ -1936,8 +1966,22 @@
       this.shadowRoot.addEventListener("click", this._onRootClick)
       this.shadowRoot.addEventListener("value-changed", this._onValueChanged)
       this._hydrateHaControls()
-      this._mountNativeEditors()
+      this._mountNativeEditors(this._nativeMountToken)
       this._mountCardPicker()
+    }
+
+    _scheduleRender() {
+      if (this._renderPending) return
+      this._renderPending = true
+      const render = () => {
+        if (!this._renderPending) return
+        this._render()
+      }
+      if (typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(render)
+      } else {
+        queueMicrotask(render)
+      }
     }
 
     _navButton(section, label) {
@@ -1966,6 +2010,25 @@
         .filter((card) => card?.type && ![CARD_TYPE, ALT_CARD_TYPE].includes(card.type))
         .map((card) => ["custom:" + card.type, card.name || "custom:" + card.type])
       return this._optionList([...CORE_CARD_OPTIONS, ...customOptions])
+    }
+
+    _cardTypeSignature() {
+      return (window.customCards || [])
+        .map((card) => card?.type || "")
+        .filter(Boolean)
+        .join("|")
+    }
+
+    _cachedFormSchema(form) {
+      const signature = this._cardTypeSignature()
+      if (signature !== this._schemaCacheSignature) {
+        this._schemaCacheSignature = signature
+        this._schemaCache.clear()
+      }
+      if (!this._schemaCache.has(form)) {
+        this._schemaCache.set(form, this._formSchema(form))
+      }
+      return this._schemaCache.get(form)
     }
 
     _createCardTemplate(type) {
@@ -2509,6 +2572,39 @@
       `
     }
 
+    _refreshEditorTabButtons() {
+      const buttons = Array.from(this.shadowRoot.querySelectorAll(".tab-list .tab-chip"))
+      buttons.forEach((button, index) => {
+        const tab = this._config.tabs[index]
+        if (!tab) return
+        button.textContent = tab.attributes.label || "Tab " + String(index + 1)
+      })
+    }
+
+    _refreshCardSummary(tabIndex, cardIndex) {
+      if (tabIndex !== this._editingTabIndex) return
+      const card = this._config.tabs[tabIndex]?.cards[cardIndex]
+      const title = this.shadowRoot.querySelector(
+        `.card-item[data-card-index="${cardIndex}"] .card-title`
+      )
+      if (title && card) title.textContent = summarizeCard(card)
+    }
+
+    _syncCardJsonTextarea(tabIndex, cardIndex) {
+      const textarea = this.shadowRoot.querySelector(
+        `textarea[data-field="card.json"][data-tab-index="${tabIndex}"][data-card-index="${cardIndex}"]`
+      )
+      const card = this._config.tabs[tabIndex]?.cards[cardIndex]
+      if (textarea && card) textarea.value = JSON.stringify(card, null, 2)
+    }
+
+    _syncCardBasicForm(tabIndex, cardIndex) {
+      const form = this.shadowRoot.querySelector(
+        `ha-form[data-form="card-basic"][data-tab-index="${tabIndex}"][data-card-index="${cardIndex}"]`
+      )
+      if (form) form.data = this._formData("card-basic", form)
+    }
+
     _renderAdvancedPanel() {
       return `
         <div class="section">
@@ -2585,7 +2681,7 @@
           styles: {},
           conditions: [],
           badge: normalizeBadge({}),
-          cards: [clone(CARD_TEMPLATES.entity)],
+          cards: [],
         })
         this._editingTabIndex = this._config.tabs.length - 1
         this._emit(true)
@@ -2645,7 +2741,7 @@
 
       if (action === "delete-card") {
         const cards = this._config.tabs[tabIndex].cards
-        if (cards.length <= 1) return
+        if (!cards || cardIndex < 0 || cardIndex >= cards.length) return
         cards.splice(cardIndex, 1)
         this._emit(true)
         return
@@ -2653,6 +2749,7 @@
 
       if (action === "duplicate-card") {
         const cards = this._config.tabs[tabIndex].cards
+        if (!cards || cardIndex < 0 || cardIndex >= cards.length) return
         cards.splice(cardIndex + 1, 0, clone(cards[cardIndex]))
         this._emit(true)
         return
@@ -2676,6 +2773,19 @@
         if (item?.dataset && key in item.dataset) return item
       }
       return event.target?.closest?.(`[data-${key}]`) || null
+    }
+
+    _setCardEntity(card, entity) {
+      const nextEntity = asString(entity, "").trim()
+      if (Array.isArray(card.entities)) {
+        card.entities = nextEntity ? [nextEntity] : []
+        return
+      }
+      if (nextEntity) {
+        card.entity = nextEntity
+      } else {
+        delete card.entity
+      }
     }
 
     _applyFormData(form, value, target) {
@@ -2722,7 +2832,8 @@
         tab.styles.accent_color = asString(value.accent_color, "")
         tab.styles.panel_padding = asString(value.panel_padding, "")
         tab.styles.panel_background = asString(value.panel_background, "")
-        this._emit(true)
+        this._refreshEditorTabButtons()
+        this._emit(false)
         return
       }
 
@@ -2753,28 +2864,35 @@
         if (!card) return
         const nextType = asString(value.type, card.type || "entity")
         const typeChanged = nextType && nextType !== card.type
+        const nextEntity = asString(value.entity, "")
+        const nextTitle = asString(value.title, "")
+        const nextContent = asString(value.content, "")
         if (typeChanged) {
           const replacement = this._createCardTemplate(nextType)
-          tab.cards[cardIndex] = Object.assign(replacement, {
-            entity: value.entity || replacement.entity,
-            title: value.title || replacement.title,
-            content: value.content || replacement.content,
-          })
+          this._setCardEntity(replacement, nextEntity)
+          if (nextTitle) replacement.title = nextTitle
+          if (nextType === "markdown" || "content" in replacement || nextContent) {
+            replacement.content = nextContent || replacement.content || ""
+          }
+          tab.cards[cardIndex] = replacement
         } else {
           card.type = nextType
-          if (Array.isArray(card.entities)) {
-            card.entities = value.entity ? [value.entity] : []
-          } else if (value.entity !== undefined) {
-            card.entity = value.entity
+          this._setCardEntity(card, nextEntity)
+          if (nextTitle) {
+            card.title = nextTitle
+            if ("name" in card) card.name = nextTitle
+          } else {
+            delete card.title
+            if ("name" in card) delete card.name
           }
-          if (value.title !== undefined) {
-            card.title = value.title
-            if ("name" in card) card.name = value.title
-          }
-          if (value.content !== undefined) {
-            card.content = value.content
+          if (nextType === "markdown" || "content" in card || nextContent) {
+            card.content = nextContent
+          } else {
+            delete card.content
           }
         }
+        this._refreshCardSummary(tabIndex, cardIndex)
+        this._syncCardJsonTextarea(tabIndex, cardIndex)
         this._emit(typeChanged)
         return
       }
@@ -2808,18 +2926,22 @@
 
     _emit(reRender) {
       this._editingTabIndex = clamp(this._editingTabIndex, 0, this._config.tabs.length - 1)
-      dispatchConfigChanged(this, toPublicConfig(this._config))
-      if (reRender) this._render()
+      const publicConfig = toPublicConfig(this._config)
+      this._lastEmittedConfigText = serializeConfig(publicConfig)
+      dispatchConfigChanged(this, publicConfig)
+      if (reRender) this._scheduleRender()
     }
 
-    _hydrateHaControls() {
+    _hydrateHaControls(options = {}) {
       if (!this.shadowRoot) return
+      const refreshSchema = options.schema !== false
+      const refreshData = options.data !== false
       this.shadowRoot.querySelectorAll("ha-form").forEach((form) => {
         form.hass = this._hass
-        form.schema = this._formSchema(form.dataset.form)
-        form.data = this._formData(form.dataset.form, form)
-        form.computeLabel = this._computeFormLabel.bind(this)
-        form.computeHelper = this._computeFormHelper.bind(this)
+        if (refreshSchema || !form.schema) form.schema = this._cachedFormSchema(form.dataset.form)
+        if (refreshData || !form.data) form.data = this._formData(form.dataset.form, form)
+        form.computeLabel = this._boundComputeLabel
+        form.computeHelper = this._boundComputeHelper
       })
       this.shadowRoot.querySelectorAll("ha-entity-picker, ha-icon-picker").forEach((picker) => {
         picker.hass = this._hass
@@ -2828,6 +2950,33 @@
       })
       this._nativeEditors.forEach((editor) => {
         editor.hass = this._hass
+      })
+    }
+
+    _syncHassToChildren() {
+      if (!this.shadowRoot) return
+      this.shadowRoot.querySelectorAll("ha-form").forEach((form) => {
+        form.hass = this._hass
+      })
+      this.shadowRoot.querySelectorAll("ha-entity-picker, ha-icon-picker").forEach((picker) => {
+        picker.hass = this._hass
+        picker.allowCustomEntity = true
+      })
+      const picker = this.shadowRoot.querySelector("hui-card-picker")
+      if (picker) picker.hass = this._hass
+      this._nativeEditors.forEach((editor) => {
+        editor.hass = this._hass
+      })
+    }
+
+    _syncLovelaceToChildren() {
+      if (!this.shadowRoot) return
+      const lovelace = this._lovelace || getLovelace()
+      const lovelaceConfig = this._lovelaceConfig()
+      const picker = this.shadowRoot.querySelector("hui-card-picker")
+      if (picker) picker.lovelace = lovelaceConfig
+      this._nativeEditors.forEach((editor) => {
+        if (lovelace) editor.lovelace = lovelace
       })
     }
 
@@ -2840,23 +2989,37 @@
       if (!this.shadowRoot || !this._config) return
       const host = this.shadowRoot.getElementById("native-card-picker-" + this._editingTabIndex)
       if (!host) return
+      const frame = host.closest(".card-picker-frame")
       if (!customElements.get("hui-card-picker")) {
+        frame?.classList.remove("has-native-picker")
         host.innerHTML =
           '<div class="muted">Native Home Assistant card picker is not loaded in this editor session yet. Use the native card type selector below.</div>'
+        if (!this._pickerDefinitionWait && typeof customElements.whenDefined === "function") {
+          this._pickerDefinitionWait = true
+          customElements.whenDefined("hui-card-picker").then(() => {
+            this._pickerDefinitionWait = false
+            this._mountCardPicker()
+          })
+        }
         return
       }
 
-      const picker = document.createElement("hui-card-picker")
+      frame?.classList.add("has-native-picker")
+      const existingPicker = host.querySelector("hui-card-picker")
+      const picker = existingPicker || document.createElement("hui-card-picker")
       picker.hass = this._hass
       picker.lovelace = this._lovelaceConfig()
       picker.suggestedCards = ["tile", "entities", "markdown", "button", "grid"]
-      picker.addEventListener("config-changed", (event) => {
-        event.stopPropagation()
-        const cardConfig = event.detail?.config
-        if (!isObject(cardConfig)) return
-        this._addPickedCard(Number(host.dataset.tabIndex), cardConfig)
-      })
-      host.replaceChildren(picker)
+      if (!picker._utcPickerListenerAttached) {
+        picker._utcPickerListenerAttached = true
+        picker.addEventListener("config-changed", (event) => {
+          event.stopPropagation()
+          const cardConfig = event.detail?.config
+          if (!isObject(cardConfig)) return
+          this._addPickedCard(Number(host.dataset.tabIndex), cardConfig)
+        })
+      }
+      if (!existingPicker) host.replaceChildren(picker)
     }
 
     _addPickedCard(tabIndex, cardConfig) {
@@ -2866,20 +3029,31 @@
       this._emit(true)
     }
 
-    async _mountNativeEditors() {
+    _mountNativeEditors(token = this._nativeMountToken) {
       const tab = this._config.tabs[this._editingTabIndex]
       if (!tab) return
-      for (let cardIndex = 0; cardIndex < tab.cards.length; cardIndex += 1) {
+      const mountNext = (cardIndex) => {
+        if (token !== this._nativeMountToken || cardIndex >= tab.cards.length) return
         const key = this._nativeKey(this._editingTabIndex, cardIndex)
         const host = this.shadowRoot.getElementById("native-editor-" + key)
-        if (!host || this._loadingEditors.has(key)) continue
+        if (!host || this._loadingEditors.has(key)) {
+          mountNext(cardIndex + 1)
+          return
+        }
         this._loadingEditors.add(key)
-        const editor = await this._createNativeEditor(this._editingTabIndex, cardIndex)
-        this._loadingEditors.delete(key)
-        if (!editor) continue
-        this._nativeEditors.set(key, editor)
-        host.replaceChildren(editor)
+        requestIdle(async () => {
+          if (token !== this._nativeMountToken) return
+          const editor = await this._createNativeEditor(this._editingTabIndex, cardIndex)
+          if (token !== this._nativeMountToken) return
+          this._loadingEditors.delete(key)
+          if (editor) {
+            this._nativeEditors.set(key, editor)
+            host.replaceChildren(editor)
+          }
+          mountNext(cardIndex + 1)
+        })
       }
+      mountNext(0)
     }
 
     async _createNativeEditor(tabIndex, cardIndex) {
@@ -2904,7 +3078,7 @@
           maybeEditor && typeof maybeEditor.then === "function" ? await maybeEditor : maybeEditor
         if (!editor || typeof editor.setConfig !== "function") return null
         editor.hass = this._hass
-        const lovelace = getLovelace()
+        const lovelace = this._lovelace || getLovelace()
         if (lovelace) editor.lovelace = lovelace
         editor.setConfig(card)
         editor.addEventListener("config-changed", (event) => {
@@ -2912,11 +3086,10 @@
           const nextConfig = event.detail?.config
           if (!isObject(nextConfig)) return
           this._config.tabs[tabIndex].cards[cardIndex] = clone(nextConfig)
-          dispatchConfigChanged(this, toPublicConfig(this._config))
-          const textarea = this.shadowRoot.querySelector(
-            `textarea[data-field="card.json"][data-tab-index="${tabIndex}"][data-card-index="${cardIndex}"]`
-          )
-          if (textarea) textarea.value = JSON.stringify(nextConfig, null, 2)
+          this._refreshCardSummary(tabIndex, cardIndex)
+          this._syncCardBasicForm(tabIndex, cardIndex)
+          this._syncCardJsonTextarea(tabIndex, cardIndex)
+          this._emit(false)
         })
         return editor
       } catch (_) {
