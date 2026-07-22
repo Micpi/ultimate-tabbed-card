@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.4"
+  const VERSION = "0.3.5"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -163,6 +163,23 @@
     }
   }
 
+  function getFirstAreaId(hass) {
+    const areas = hass?.areas
+    if (!areas) return ""
+    const firstKey = Object.keys(areas)[0]
+    return firstKey || Object.values(areas)[0]?.area_id || ""
+  }
+
+  function normalizeChildCardConfig(card, hass) {
+    const next = clone(card)
+    if (next?.type === "area") {
+      if (!next.area && next.area_id) next.area = next.area_id
+      delete next.area_id
+      if (!next.area) next.area = getFirstAreaId(hass)
+    }
+    return next
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -201,10 +218,10 @@
 
   function normalizeCards(tab) {
     if (Array.isArray(tab?.cards) && tab.cards.length) {
-      return tab.cards.filter(isObject).map((card) => clone(card))
+      return tab.cards.filter(isObject).map((card) => normalizeChildCardConfig(card))
     }
     if (isObject(tab?.card)) {
-      return [clone(tab.card)]
+      return [normalizeChildCardConfig(tab.card)]
     }
     return []
   }
@@ -1653,6 +1670,8 @@
       this._editingTabIndex = 0
       this._nativeEditors = new Map()
       this._loadingEditors = new Set()
+      this._expandedEditorKeys = new Set()
+      this._openPickerTabs = new Set()
       this._nativeMountToken = 0
       this._renderPending = false
       this._lastEmittedConfigText = ""
@@ -1663,6 +1682,7 @@
 
       this._onRootChange = this._onRootChange.bind(this)
       this._onRootClick = this._onRootClick.bind(this)
+      this._onRootToggle = this._onRootToggle.bind(this)
       this._onValueChanged = this._onValueChanged.bind(this)
     }
 
@@ -1877,6 +1897,13 @@
             gap: 8px;
           }
 
+          .native-editor-details summary,
+          .card-picker-details summary {
+            cursor: pointer;
+            color: var(--primary-text-color);
+            font-weight: 600;
+          }
+
           .card-picker-frame {
             display: grid;
             gap: 12px;
@@ -1916,33 +1943,22 @@
             ${this._navButton("tabs", "Tabs")}
             ${this._navButton("advanced", "Advanced")}
           </div>
-          <section class="panel" data-panel="general" ${this._section === "general" ? "" : "hidden"}>
-            ${this._renderGeneralPanel()}
-          </section>
-          <section class="panel" data-panel="appearance" ${
-            this._section === "appearance" ? "" : "hidden"
-          }>
-            ${this._renderAppearancePanel()}
-          </section>
-          <section class="panel" data-panel="tabs" ${this._section === "tabs" ? "" : "hidden"}>
-            ${this._renderTabsPanel()}
-          </section>
-          <section class="panel" data-panel="advanced" ${
-            this._section === "advanced" ? "" : "hidden"
-          }>
-            ${this._renderAdvancedPanel()}
+          <section class="panel" data-panel="${this._section}">
+            ${this._renderActivePanel()}
           </section>
         </div>
       `
 
       this.shadowRoot.removeEventListener("change", this._onRootChange)
       this.shadowRoot.removeEventListener("click", this._onRootClick)
+      this.shadowRoot.removeEventListener("toggle", this._onRootToggle, true)
       this.shadowRoot.removeEventListener("value-changed", this._onValueChanged)
       this.shadowRoot.addEventListener("change", this._onRootChange)
       this.shadowRoot.addEventListener("click", this._onRootClick)
+      this.shadowRoot.addEventListener("toggle", this._onRootToggle, true)
       this.shadowRoot.addEventListener("value-changed", this._onValueChanged)
       this._hydrateHaControls()
-      this._mountNativeEditors(this._nativeMountToken)
+      this._mountOpenedNativeEditors(this._nativeMountToken)
       this._mountCardPicker()
     }
 
@@ -1967,6 +1983,13 @@
       }" type="button" data-action="section" data-section="${section}" class="${
         active ? "active" : ""
       }">${label}</ha-button>`
+    }
+
+    _renderActivePanel() {
+      if (this._section === "appearance") return this._renderAppearancePanel()
+      if (this._section === "tabs") return this._renderTabsPanel()
+      if (this._section === "advanced") return this._renderAdvancedPanel()
+      return this._renderGeneralPanel()
     }
 
     _haForm(form, tabIndex, cardIndex, conditionIndex) {
@@ -2429,17 +2452,22 @@
       const cards = tab.cards
         .map((card, index) => this._renderCardItem(card, index))
         .join("")
+      const pickerOpen = !tab.cards.length || this._openPickerTabs.has(this._editingTabIndex)
       return `
         <div class="section">
           <div class="section-title">Cards in this tab</div>
           ${cards}
           <div class="card-picker-frame">
-            <div class="section-title">Add a card</div>
-            <div class="native-card-picker" id="native-card-picker-${this._editingTabIndex}" data-tab-index="${
-              this._editingTabIndex
-            }">
-              <div class="muted">Home Assistant card picker is loading.</div>
-            </div>
+            <details class="card-picker-details" data-tab-index="${this._editingTabIndex}" ${
+              pickerOpen ? "open" : ""
+            }>
+              <summary>Add a card</summary>
+              <div class="native-card-picker" id="native-card-picker-${this._editingTabIndex}" data-tab-index="${
+                this._editingTabIndex
+              }">
+                <div class="muted">Home Assistant card picker is loading.</div>
+              </div>
+            </details>
           </div>
         </div>
       `
@@ -2447,6 +2475,7 @@
 
     _renderCardItem(card, index) {
       const key = this._nativeKey(this._editingTabIndex, index)
+      const editorOpen = this._expandedEditorKeys.has(key)
       return `
         <div class="card-item" data-card-index="${index}">
           <div class="card-title">${escapeHtml(summarizeCard(card))}</div>
@@ -2464,14 +2493,19 @@
               this._editingTabIndex
             }" data-card-index="${index}" class="danger">Delete</ha-button>
           </div>
-          <div class="native-editor-host" id="native-editor-${key}">
-            <div class="muted">Native visual editor loads here when this card type provides one.</div>
-          </div>
-          <details class="advanced-json">
+          <details class="native-editor-details" data-editor-key="${key}" data-tab-index="${
+            this._editingTabIndex
+          }" data-card-index="${index}" ${editorOpen ? "open" : ""}>
+            <summary>Visual editor</summary>
+            <div class="native-editor-host" id="native-editor-${key}">
+              <div class="muted">Open this panel to load the native visual editor.</div>
+            </div>
+          </details>
+          <details class="advanced-json" data-json-details data-tab-index="${
+            this._editingTabIndex
+          }" data-card-index="${index}">
             <summary>Advanced JSON fallback</summary>
-            <textarea data-field="card.json" data-tab-index="${this._editingTabIndex}" data-card-index="${index}">${escapeHtml(
-              JSON.stringify(card, null, 2)
-            )}</textarea>
+            <div class="json-editor-host" id="json-editor-${key}"></div>
             <div class="error" id="json-error-${key}"></div>
           </details>
         </div>
@@ -2502,6 +2536,36 @@
       )
       const card = this._config.tabs[tabIndex]?.cards[cardIndex]
       if (textarea && card) textarea.value = JSON.stringify(card, null, 2)
+    }
+
+    _clearMountedCardEditors(tabIndex) {
+      const prefix = String(tabIndex) + "-"
+      ;[this._expandedEditorKeys, this._nativeEditors, this._loadingEditors].forEach((collection) => {
+        Array.from(collection.keys()).forEach((key) => {
+          if (key.startsWith(prefix)) collection.delete(key)
+        })
+      })
+    }
+
+    _clearAllEditorState() {
+      this._expandedEditorKeys.clear()
+      this._nativeEditors.clear()
+      this._loadingEditors.clear()
+      this._openPickerTabs.clear()
+    }
+
+    _mountJsonEditor(details) {
+      const tabIndex = Number(details.dataset.tabIndex)
+      const cardIndex = Number(details.dataset.cardIndex)
+      const host = details.querySelector(".json-editor-host")
+      const card = this._config.tabs[tabIndex]?.cards[cardIndex]
+      if (!host || !card || host.querySelector("textarea")) return
+      const textarea = document.createElement("textarea")
+      textarea.dataset.field = "card.json"
+      textarea.dataset.tabIndex = String(tabIndex)
+      textarea.dataset.cardIndex = String(cardIndex)
+      textarea.value = JSON.stringify(card, null, 2)
+      host.replaceChildren(textarea)
     }
 
     _renderAdvancedPanel() {
@@ -2593,6 +2657,7 @@
         copy.attributes.id = slugify(copy.attributes.label, "tab-" + String(this._config.tabs.length + 1))
         this._config.tabs.splice(tabIndex + 1, 0, copy)
         this._editingTabIndex = tabIndex + 1
+        this._clearAllEditorState()
         this._emit(true)
         return
       }
@@ -2601,6 +2666,7 @@
         if (this._config.tabs.length <= 1) return
         this._config.tabs.splice(tabIndex, 1)
         this._editingTabIndex = clamp(tabIndex, 0, this._config.tabs.length - 1)
+        this._clearAllEditorState()
         this._emit(true)
         return
       }
@@ -2635,6 +2701,7 @@
       if (action === "delete-card") {
         const cards = this._config.tabs[tabIndex].cards
         if (!cards || cardIndex < 0 || cardIndex >= cards.length) return
+        this._clearMountedCardEditors(tabIndex)
         cards.splice(cardIndex, 1)
         this._emit(true)
         return
@@ -2643,20 +2710,70 @@
       if (action === "duplicate-card") {
         const cards = this._config.tabs[tabIndex].cards
         if (!cards || cardIndex < 0 || cardIndex >= cards.length) return
+        this._clearMountedCardEditors(tabIndex)
         cards.splice(cardIndex + 1, 0, clone(cards[cardIndex]))
         this._emit(true)
         return
       }
 
       if (action === "move-card-up" && cardIndex > 0) {
+        this._clearMountedCardEditors(tabIndex)
         this._swap(this._config.tabs[tabIndex].cards, cardIndex, cardIndex - 1)
         this._emit(true)
         return
       }
 
       if (action === "move-card-down" && cardIndex < this._config.tabs[tabIndex].cards.length - 1) {
+        this._clearMountedCardEditors(tabIndex)
         this._swap(this._config.tabs[tabIndex].cards, cardIndex, cardIndex + 1)
         this._emit(true)
+      }
+    }
+
+    _onRootToggle(event) {
+      const details = event.target
+      if (!details || details.tagName !== "DETAILS") return
+
+      if (details.classList.contains("card-picker-details")) {
+        const tabIndex = Number(details.dataset.tabIndex)
+        if (details.open) {
+          this._openPickerTabs.add(tabIndex)
+          this._mountCardPicker()
+        } else {
+          this._openPickerTabs.delete(tabIndex)
+          const host = this.shadowRoot.getElementById("native-card-picker-" + tabIndex)
+          if (host) {
+            host.replaceChildren(Object.assign(document.createElement("div"), {
+              className: "muted",
+              textContent: "Open this panel to load the Home Assistant card picker.",
+            }))
+          }
+        }
+        return
+      }
+
+      if (details.classList.contains("native-editor-details")) {
+        const key = details.dataset.editorKey
+        if (!key) return
+        if (details.open) {
+          this._expandedEditorKeys.add(key)
+          this._mountNativeEditorDetails(details, this._nativeMountToken)
+        } else {
+          this._expandedEditorKeys.delete(key)
+          this._nativeEditors.delete(key)
+          const host = this.shadowRoot.getElementById("native-editor-" + key)
+          if (host) {
+            host.replaceChildren(Object.assign(document.createElement("div"), {
+              className: "muted",
+              textContent: "Open this panel to load the native visual editor.",
+            }))
+          }
+        }
+        return
+      }
+
+      if (details.hasAttribute("data-json-details") && details.open) {
+        this._mountJsonEditor(details)
       }
     }
 
@@ -2748,7 +2865,7 @@
         if (!isObject(parsed) || !parsed.type) {
           throw new Error("Card JSON must be an object with a type field.")
         }
-        this._config.tabs[tabIndex].cards[cardIndex] = parsed
+        this._config.tabs[tabIndex].cards[cardIndex] = normalizeChildCardConfig(parsed, this._hass)
         if (error) error.textContent = ""
         this._emit(true)
       } catch (err) {
@@ -2827,6 +2944,8 @@
       if (!this.shadowRoot || !this._config) return
       const host = this.shadowRoot.getElementById("native-card-picker-" + this._editingTabIndex)
       if (!host) return
+      const details = host.closest(".card-picker-details")
+      if (details && !details.open) return
       if (!customElements.get("hui-card-picker")) {
         host.innerHTML =
           '<div class="muted">Native Home Assistant card picker is not loaded in this editor session yet.</div>'
@@ -2860,40 +2979,65 @@
     _addPickedCard(tabIndex, cardConfig) {
       const tab = this._config.tabs[tabIndex]
       if (!tab) return
-      tab.cards.push(clone(cardConfig))
+      const nextCard = normalizeChildCardConfig(cardConfig, this._hass)
+      if (!isObject(nextCard)) return
+      const cardIndex = tab.cards.length
+      tab.cards.push(nextCard)
+      this._openPickerTabs.delete(tabIndex)
+      this._expandedEditorKeys.add(this._nativeKey(tabIndex, cardIndex))
       this._emit(true)
     }
 
-    _mountNativeEditors(token = this._nativeMountToken) {
-      const tab = this._config.tabs[this._editingTabIndex]
-      if (!tab) return
-      const mountNext = (cardIndex) => {
-        if (token !== this._nativeMountToken || cardIndex >= tab.cards.length) return
-        const key = this._nativeKey(this._editingTabIndex, cardIndex)
-        const host = this.shadowRoot.getElementById("native-editor-" + key)
-        if (!host || this._loadingEditors.has(key)) {
-          mountNext(cardIndex + 1)
+    _mountOpenedNativeEditors(token = this._nativeMountToken) {
+      if (this._section !== "tabs") return
+      this.shadowRoot.querySelectorAll(".native-editor-details[open]").forEach((details) => {
+        this._mountNativeEditorDetails(details, token)
+      })
+    }
+
+    _mountNativeEditorDetails(details, token = this._nativeMountToken) {
+      const tabIndex = Number(details.dataset.tabIndex)
+      const cardIndex = Number(details.dataset.cardIndex)
+      const key = details.dataset.editorKey || this._nativeKey(tabIndex, cardIndex)
+      const host = this.shadowRoot.getElementById("native-editor-" + key)
+      if (!host || this._nativeEditors.has(key) || this._loadingEditors.has(key)) return
+
+      this._loadingEditors.add(key)
+      host.replaceChildren(Object.assign(document.createElement("div"), {
+        className: "muted",
+        textContent: "Loading native visual editor.",
+      }))
+
+      requestIdle(async () => {
+        if (token !== this._nativeMountToken || !this._expandedEditorKeys.has(key)) {
+          this._loadingEditors.delete(key)
           return
         }
-        this._loadingEditors.add(key)
-        requestIdle(async () => {
-          if (token !== this._nativeMountToken) return
-          const editor = await this._createNativeEditor(this._editingTabIndex, cardIndex)
-          if (token !== this._nativeMountToken) return
-          this._loadingEditors.delete(key)
-          if (editor) {
-            this._nativeEditors.set(key, editor)
-            host.replaceChildren(editor)
-          }
-          mountNext(cardIndex + 1)
-        })
-      }
-      mountNext(0)
+        const editor = await this._createNativeEditor(tabIndex, cardIndex)
+        this._loadingEditors.delete(key)
+        if (token !== this._nativeMountToken || !this._expandedEditorKeys.has(key)) return
+        if (editor) {
+          this._nativeEditors.set(key, editor)
+          host.replaceChildren(editor)
+        } else {
+          host.replaceChildren(Object.assign(document.createElement("div"), {
+            className: "muted",
+            textContent: "This card does not expose a native visual editor.",
+          }))
+        }
+      })
     }
 
     async _createNativeEditor(tabIndex, cardIndex) {
-      const card = this._config.tabs[tabIndex]?.cards[cardIndex]
+      let card = this._config.tabs[tabIndex]?.cards[cardIndex]
       if (!card?.type || !window.loadCardHelpers) return null
+      const normalizedCard = normalizeChildCardConfig(card, this._hass)
+      if (serializeConfig(normalizedCard) !== serializeConfig(card)) {
+        card = normalizedCard
+        this._config.tabs[tabIndex].cards[cardIndex] = normalizedCard
+        this._syncCardJsonTextarea(tabIndex, cardIndex)
+        this._emit(false)
+      }
       const tagName = getCardTagName(card.type)
       try {
         const helpers = await window.loadCardHelpers()
@@ -2920,7 +3064,7 @@
           event.stopPropagation()
           const nextConfig = event.detail?.config
           if (!isObject(nextConfig)) return
-          this._config.tabs[tabIndex].cards[cardIndex] = clone(nextConfig)
+          this._config.tabs[tabIndex].cards[cardIndex] = normalizeChildCardConfig(nextConfig, this._hass)
           this._refreshCardSummary(tabIndex, cardIndex)
           this._syncCardJsonTextarea(tabIndex, cardIndex)
           this._emit(false)
