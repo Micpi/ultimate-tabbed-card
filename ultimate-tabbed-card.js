@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.10"
+  const VERSION = "0.3.11"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -265,6 +265,7 @@
   }
 
   const CARD_CLIPBOARD_KEY = "ultimate-tabbed-card:card-clipboard"
+  const ACTIVE_TAB_MEMORY_MAX_AGE = 10 * 60 * 1000
 
   let instanceCounter = 0
 
@@ -813,6 +814,26 @@
     window.setTimeout(fn, 80)
   }
 
+  function loadCardHelpersWhenReady() {
+    if (window.loadCardHelpers) return window.loadCardHelpers()
+    return new Promise((resolve, reject) => {
+      let attempts = 0
+      const check = () => {
+        if (window.loadCardHelpers) {
+          resolve(window.loadCardHelpers())
+          return
+        }
+        attempts += 1
+        if (attempts > 120) {
+          reject(new Error("window.loadCardHelpers is not available."))
+          return
+        }
+        window.setTimeout(check, 50)
+      }
+      check()
+    })
+  }
+
   class TabbedCard extends HTMLElement {
     static getConfigElement() {
       return document.createElement(CARD_EDITOR_TYPE)
@@ -902,9 +923,7 @@
       const previousId = this._config?.tabs?.[previousIndex]?.attributes?.id || ""
       this._config = normalizeConfig(config)
       this._renderVersion += 1
-      this._helpersPromise = window.loadCardHelpers
-        ? window.loadCardHelpers()
-        : Promise.reject(new Error("window.loadCardHelpers is not available."))
+      this._helpersPromise = loadCardHelpersWhenReady()
       this._selectedIndex = this._resolveInitialIndex({
         preserveCurrent: hadConfig,
         previousIndex,
@@ -992,6 +1011,9 @@
       const hashIndex = this._getIndexFromHash()
       if (hashIndex !== -1) return hashIndex
 
+      const transient = this._readTransientIndex()
+      if (transient !== -1) return transient
+
       const remembered = this._readRememberedIndex()
       if (remembered !== -1) return remembered
 
@@ -1012,6 +1034,52 @@
       if (prefix && !rawHash.startsWith(prefix)) return -1
       const tabId = prefix ? rawHash.slice(prefix.length) : rawHash
       return this._config.tabs.findIndex((tab) => tab.attributes.id === tabId)
+    }
+
+    _transientStateKey() {
+      if (!this._config) return ""
+      const path = window.location?.pathname || ""
+      const ids = this._config.tabs.map((tab) => tab.attributes.id).join("|")
+      const configuredKey = this._config.options.storageKey || ""
+      return ["ultimate-tabbed-card", path, configuredKey, ids].join(":")
+    }
+
+    _readTransientIndex() {
+      const key = this._transientStateKey()
+      if (!key) return -1
+      try {
+        const store = window.__ultimateTabbedCardActiveTabs
+        const entry = store instanceof Map ? store.get(key) : null
+        if (!entry || Date.now() - entry.at > ACTIVE_TAB_MEMORY_MAX_AGE) return -1
+        if (entry.id) {
+          const byId = this._config.tabs.findIndex((tab) => tab.attributes.id === entry.id)
+          if (byId !== -1) return byId
+        }
+        if (Number.isFinite(entry.index) && entry.index >= 0 && entry.index < this._config.tabs.length) {
+          return entry.index
+        }
+      } catch (_) {}
+      return -1
+    }
+
+    _rememberTransientIndex(index) {
+      const key = this._transientStateKey()
+      if (!key) return
+      try {
+        const store = (window.__ultimateTabbedCardActiveTabs =
+          window.__ultimateTabbedCardActiveTabs instanceof Map
+            ? window.__ultimateTabbedCardActiveTabs
+            : new Map())
+        store.set(key, {
+          index,
+          id: this._config.tabs[index]?.attributes?.id || "",
+          at: Date.now(),
+        })
+        if (store.size > 80) {
+          const oldest = [...store.entries()].sort((a, b) => a[1].at - b[1].at)[0]?.[0]
+          if (oldest) store.delete(oldest)
+        }
+      } catch (_) {}
     }
 
     _storageKey() {
@@ -1461,9 +1529,14 @@
         return
       }
       this._removePanelMessages()
-      if (selectedChanged && this._activeCardIndex !== -1) {
+      if (selectedChanged || this._needsActivePane()) {
         this._activateSelectedTab({ force: true, silent: true })
       }
+    }
+
+    _needsActivePane() {
+      const entry = this._cardCache.get(this._selectedIndex)
+      return this._activeCardIndex !== this._selectedIndex || !entry?.pane?.isConnected
     }
 
     _resolveSelectableIndex(preferredIndex = this._selectedIndex) {
@@ -1623,6 +1696,7 @@
 
       const activationToken = ++this._activationToken
       this._selectedIndex = clamped
+      this._rememberTransientIndex(clamped)
       this._rememberIndex(clamped)
       this._updateHash(clamped)
       this._scheduleTabsRender()
