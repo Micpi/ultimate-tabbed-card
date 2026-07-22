@@ -1,7 +1,7 @@
 ;(function () {
   "use strict"
 
-  const VERSION = "0.3.8"
+  const VERSION = "0.3.9"
   const CARD_TYPE = "tabbed-card"
   const ALT_CARD_TYPE = "ultimate-tabbed-card"
   const CARD_EDITOR_TYPE = "tabbed-card-editor"
@@ -207,6 +207,63 @@
     ["glass", "Glass"],
   ]
 
+  const COLOR_STYLE_FIELDS = [
+    "background_color",
+    "panel_background",
+    "bar_background",
+    "text_color",
+    "active_color",
+    "active_border_color",
+    "active_text_color",
+    "inactive_color",
+    "hover_color",
+    "border_color",
+    "badge_color",
+  ]
+
+  const TAB_SIZE_STYLE_FIELDS = [
+    "tab_min_width",
+    "tab_font_size",
+    "tab_font_weight",
+    "tab_border_width",
+    "tab_icon_size",
+  ]
+
+  const SPACING_STYLE_FIELDS = [
+    "radius",
+    "tab_radius",
+    "tab_padding",
+    "header_padding",
+    "panel_padding",
+    "tab_gap",
+    "content_gap",
+    "min_height",
+  ]
+
+  const TAB_COLOR_FIELDS = ["accent_color", "panel_background"]
+  const TAB_SIZE_FIELDS = ["panel_padding"]
+  const TAB_STYLE_DEFAULTS = {
+    accent_color: "",
+    panel_background: "",
+    panel_padding: "",
+  }
+
+  const STYLE_STEPPER_SETTINGS = {
+    radius: { step: 1, min: 0, unit: "px" },
+    tab_radius: { step: 1, min: 0, unit: "px" },
+    tab_padding: { step: 1, min: 0, unit: "px" },
+    header_padding: { step: 1, min: 0, unit: "px" },
+    panel_padding: { step: 1, min: 0, unit: "px" },
+    tab_gap: { step: 1, min: 0, unit: "px" },
+    content_gap: { step: 1, min: 0, unit: "px" },
+    min_height: { step: 1, min: 0, unit: "px" },
+    tab_min_width: { step: 1, min: 0, unit: "px" },
+    tab_font_size: { step: 0.05, min: 0, unit: "rem", precision: 2 },
+    tab_font_weight: { step: 100, min: 100, max: 900, unit: "", precision: 0 },
+    tab_border_width: { step: 1, min: 0, unit: "px" },
+    tab_icon_size: { step: 1, min: 0, unit: "px" },
+  }
+
   const CARD_CLIPBOARD_KEY = "ultimate-tabbed-card:card-clipboard"
 
   let instanceCounter = 0
@@ -317,6 +374,66 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;")
+  }
+
+  function cssColorToHex(value) {
+    const text = asString(value, "").trim()
+    let match = text.match(/^#([0-9a-f]{3})$/i)
+    if (match) {
+      return (
+        "#" +
+        match[1]
+          .split("")
+          .map((part) => part + part)
+          .join("")
+          .toLowerCase()
+      )
+    }
+    match = text.match(/^#([0-9a-f]{6})$/i)
+    if (match) return "#" + match[1].toLowerCase()
+    match = text.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i)
+    if (!match) return ""
+    const toByte = (part) => clamp(Math.round(Number(part)), 0, 255).toString(16).padStart(2, "0")
+    return "#" + toByte(match[1]) + toByte(match[2]) + toByte(match[3])
+  }
+
+  function decimalPlaces(value) {
+    const text = String(value)
+    return text.includes(".") ? text.split(".")[1].length : 0
+  }
+
+  function formatCssNumber(value, precision) {
+    const rounded = precision > 0 ? value.toFixed(precision) : String(Math.round(value))
+    if (!rounded.includes(".")) return rounded
+    const cleaned = rounded.replace(/\.?0+$/, "")
+    return cleaned || "0"
+  }
+
+  function stepCssValue(value, fallback, direction, settings = {}) {
+    const source = asString(value || fallback || "", "")
+    const step = Number(settings.step || 1) * direction
+    const numberPattern = /(-?\d*\.?\d+)([a-z%]*)/gi
+    const matches = [...source.matchAll(numberPattern)]
+    if (!matches.length) {
+      const next = Math.max(settings.min ?? 0, step > 0 ? step : 0)
+      return formatCssNumber(next, settings.precision || 0) + asString(settings.unit, "px")
+    }
+
+    const adjust = (numberText, unitText) => {
+      const current = Number(numberText)
+      const precision = settings.precision ?? Math.max(decimalPlaces(numberText), decimalPlaces(settings.step || 1))
+      let next = current + step
+      if (settings.min !== undefined) next = Math.max(settings.min, next)
+      if (settings.max !== undefined) next = Math.min(settings.max, next)
+      return formatCssNumber(next, precision) + (unitText || asString(settings.unit, ""))
+    }
+
+    if (/\b(var|calc|clamp|min|max)\(/i.test(source)) {
+      const last = matches[matches.length - 1]
+      return adjust(last[1], last[2])
+    }
+
+    return source.replace(numberPattern, (_full, numberText, unitText) => adjust(numberText, unitText))
   }
 
   function slugify(value, fallback) {
@@ -1484,8 +1601,19 @@
     }
 
     _syncPaneVisibility(activeIndex = this._selectedIndex) {
+      const panel = this.shadowRoot?.querySelector(".panel")
+      const cachedPanes = new Set()
       this._cardCache.forEach((entry, entryIndex) => {
-        entry?.pane?.classList.toggle("active", entryIndex === activeIndex)
+        if (!entry?.pane) return
+        entry.pane.dataset.index = String(entryIndex)
+        entry.pane.classList.toggle("active", entryIndex === activeIndex)
+        cachedPanes.add(entry.pane)
+      })
+      Array.from(panel?.children || []).forEach((pane) => {
+        if (!pane.classList?.contains("pane")) return
+        if (cachedPanes.has(pane)) return
+        pane.classList.remove("active")
+        pane.remove()
       })
     }
 
@@ -1493,6 +1621,7 @@
       const tab = this._config.tabs[index]
       const pane = document.createElement("div")
       pane.className = "pane"
+      pane.dataset.index = String(index)
       pane.id = "utc-panel-" + this._instanceId + "-" + index
       pane.setAttribute("role", "tabpanel")
       pane.setAttribute("aria-labelledby", "utc-tab-" + this._instanceId + "-" + index)
@@ -1982,6 +2111,106 @@
             padding: 3px;
           }
 
+          .visual-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 10px;
+          }
+
+          .visual-control {
+            display: grid;
+            gap: 6px;
+            min-width: 0;
+          }
+
+          .visual-control > span,
+          .visual-control > label {
+            font-size: 0.8rem;
+            color: var(--secondary-text-color);
+          }
+
+          .control-row {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto auto;
+            gap: 6px;
+            align-items: center;
+            min-width: 0;
+          }
+
+          .stepper-row {
+            grid-template-columns: auto minmax(0, 1fr) auto auto;
+          }
+
+          .text-row {
+            grid-template-columns: minmax(0, 1fr) auto;
+          }
+
+          .color-swatch {
+            width: 40px;
+            height: 36px;
+            border: 1px solid var(--divider-color);
+            border-radius: 8px;
+            overflow: hidden;
+            background:
+              linear-gradient(45deg, rgba(127, 127, 127, 0.35) 25%, transparent 25%),
+              linear-gradient(-45deg, rgba(127, 127, 127, 0.35) 25%, transparent 25%),
+              linear-gradient(45deg, transparent 75%, rgba(127, 127, 127, 0.35) 75%),
+              linear-gradient(-45deg, transparent 75%, rgba(127, 127, 127, 0.35) 75%);
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+            background-size: 20px 20px;
+          }
+
+          .color-swatch input[type="color"] {
+            width: 100%;
+            height: 100%;
+            min-height: 0;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            cursor: pointer;
+            opacity: 1;
+          }
+
+          .color-swatch.transparent input[type="color"] {
+            opacity: 0.35;
+          }
+
+          .style-value {
+            min-width: 0;
+          }
+
+          .mini-button,
+          .text-mini-button {
+            min-height: 36px;
+            border: 1px solid var(--divider-color);
+            border-radius: 8px;
+            background: var(--card-background-color, #fff);
+            color: var(--primary-text-color);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            cursor: pointer;
+            font: inherit;
+          }
+
+          .mini-button {
+            width: 36px;
+            padding: 0;
+          }
+
+          .text-mini-button {
+            padding: 0 9px;
+            white-space: nowrap;
+          }
+
+          .mini-button ha-icon,
+          .text-mini-button ha-icon {
+            width: 18px;
+            height: 18px;
+            pointer-events: none;
+          }
+
           textarea {
             min-height: 120px;
             font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -2147,8 +2376,22 @@
             .nav,
             .grid-2,
             .grid-3,
-            .grid-4 {
+            .grid-4,
+            .visual-grid {
               grid-template-columns: 1fr;
+            }
+
+            .control-row {
+              grid-template-columns: auto minmax(0, 1fr) auto;
+            }
+
+            .text-row {
+              grid-template-columns: minmax(0, 1fr) auto;
+            }
+
+            .text-mini-button {
+              grid-column: 1 / -1;
+              width: 100%;
             }
           }
         </style>
@@ -2357,9 +2600,6 @@
               flatten: true,
               column_min_width: "180px",
               schema: [
-                { name: "tab_min_width", selector: cssText },
-                { name: "tab_font_size", selector: cssText },
-                { name: "tab_font_weight", selector: cssText },
                 {
                   name: "tab_text_transform",
                   selector: select([
@@ -2369,8 +2609,6 @@
                     ["capitalize", "Capitalize"],
                   ]),
                 },
-                { name: "tab_border_width", selector: cssText },
-                { name: "tab_icon_size", selector: cssText },
               ],
             },
           ]
@@ -2407,9 +2645,6 @@
                 { name: "id", selector: { text: {} } },
                 { name: "hidden", selector: { boolean: {} } },
                 { name: "disabled", selector: { boolean: {} } },
-                { name: "accent_color", selector: cssText },
-                { name: "panel_padding", selector: cssText },
-                { name: "panel_background", selector: cssText },
               ],
             },
           ]
@@ -2483,15 +2718,13 @@
         case "general":
           return { ...this._config.options }
         case "appearance-layout":
+        case "appearance-tabs":
         case "appearance-colors":
         case "appearance-spacing":
           return { ...this._config.styles }
         case "tab":
           return {
             ...tab.attributes,
-            accent_color: tab.styles?.accent_color || "",
-            panel_padding: tab.styles?.panel_padding || "",
-            panel_background: tab.styles?.panel_background || "",
           }
         case "badge":
           return { ...tab.badge }
@@ -2608,14 +2841,161 @@
         <div class="section">
           <div class="section-title">Tabs</div>
           ${this._haForm("appearance-tabs")}
+          ${this._renderSizeControls(TAB_SIZE_STYLE_FIELDS)}
         </div>
         <div class="section">
           <div class="section-title">Colors</div>
-          ${this._haForm("appearance-colors")}
+          ${this._renderColorControls()}
         </div>
         <div class="section">
           <div class="section-title">Spacing and shape</div>
-          ${this._haForm("appearance-spacing")}
+          ${this._renderSizeControls(SPACING_STYLE_FIELDS)}
+          ${this._renderStyleTextControl("shadow")}
+        </div>
+      `
+    }
+
+    _renderColorControls() {
+      return `<div class="visual-grid">${COLOR_STYLE_FIELDS.map((field) => this._renderColorControl(field)).join(
+        ""
+      )}</div>`
+    }
+
+    _renderColorControl(field) {
+      const value = this._styleValue(field)
+      const fallbackHex = cssColorToHex(DEFAULT_STYLES[field]) || "#000000"
+      const colorValue = cssColorToHex(value) || fallbackHex
+      const label = this._computeFormLabel({ name: field }) || field
+      const transparent = value.trim().toLowerCase() === "transparent"
+      return `
+        <div class="visual-control">
+          <span>${escapeHtml(label)}</span>
+          <div class="control-row">
+            <span class="color-swatch ${transparent ? "transparent" : ""}">
+              <input type="color" value="${escapeHtml(colorValue)}" data-style-field="${field}" data-style-mode="color" aria-label="${escapeHtml(
+                label
+              )} color picker">
+            </span>
+            <input class="style-value" type="text" value="${escapeHtml(value)}" data-style-field="${field}" data-style-mode="text" spellcheck="false" aria-label="${escapeHtml(
+              label
+            )} CSS value">
+            <button class="text-mini-button" type="button" data-action="style-transparent" data-style-field="${field}" title="Set transparent">
+              <ha-icon icon="mdi:checkerboard"></ha-icon>
+              <span>Transparent</span>
+            </button>
+            <button class="mini-button" type="button" data-action="style-reset" data-style-field="${field}" title="Reset">
+              <ha-icon icon="mdi:restore"></ha-icon>
+            </button>
+          </div>
+        </div>
+      `
+    }
+
+    _renderSizeControls(fields) {
+      return `<div class="visual-grid">${fields.map((field) => this._renderSizeControl(field)).join("")}</div>`
+    }
+
+    _renderSizeControl(field) {
+      const value = this._styleValue(field)
+      const label = this._computeFormLabel({ name: field }) || field
+      return `
+        <div class="visual-control">
+          <label>${escapeHtml(label)}</label>
+          <div class="control-row stepper-row">
+            <button class="mini-button" type="button" data-action="style-step" data-style-field="${field}" data-step="-1" title="Decrease">
+              <ha-icon icon="mdi:minus"></ha-icon>
+            </button>
+            <input class="style-value" type="text" value="${escapeHtml(value)}" data-style-field="${field}" data-style-mode="text" spellcheck="false" aria-label="${escapeHtml(
+              label
+            )} CSS value">
+            <button class="mini-button" type="button" data-action="style-step" data-style-field="${field}" data-step="1" title="Increase">
+              <ha-icon icon="mdi:plus"></ha-icon>
+            </button>
+            <button class="mini-button" type="button" data-action="style-reset" data-style-field="${field}" title="Reset">
+              <ha-icon icon="mdi:restore"></ha-icon>
+            </button>
+          </div>
+        </div>
+      `
+    }
+
+    _renderStyleTextControl(field) {
+      const value = this._styleValue(field)
+      const label = this._computeFormLabel({ name: field }) || field
+      return `
+        <div class="visual-control">
+          <label>${escapeHtml(label)}</label>
+          <div class="control-row text-row">
+            <input class="style-value" type="text" value="${escapeHtml(value)}" data-style-field="${field}" data-style-mode="text" spellcheck="false" aria-label="${escapeHtml(
+              label
+            )} CSS value">
+            <button class="mini-button" type="button" data-action="style-reset" data-style-field="${field}" title="Reset">
+              <ha-icon icon="mdi:restore"></ha-icon>
+            </button>
+          </div>
+        </div>
+      `
+    }
+
+    _renderTabStyleControls(tabIndex) {
+      return `
+        <div class="visual-grid">
+          ${TAB_COLOR_FIELDS.map((field) => this._renderTabColorControl(tabIndex, field)).join("")}
+          ${TAB_SIZE_FIELDS.map((field) => this._renderTabSizeControl(tabIndex, field)).join("")}
+        </div>
+      `
+    }
+
+    _renderTabColorControl(tabIndex, field) {
+      const value = this._tabStyleValue(tabIndex, field)
+      const fallback = field === "accent_color" ? this._styleValue("active_color") : this._styleValue(field)
+      const colorValue = cssColorToHex(value) || cssColorToHex(fallback) || "#000000"
+      const label = this._computeFormLabel({ name: field }) || field
+      const transparent = value.trim().toLowerCase() === "transparent"
+      return `
+        <div class="visual-control">
+          <span>${escapeHtml(label)}</span>
+          <div class="control-row">
+            <span class="color-swatch ${transparent ? "transparent" : ""}">
+              <input type="color" value="${escapeHtml(colorValue)}" data-tab-style-field="${field}" data-tab-index="${tabIndex}" data-style-mode="color" aria-label="${escapeHtml(
+                label
+              )} color picker">
+            </span>
+            <input class="style-value" type="text" value="${escapeHtml(value)}" data-tab-style-field="${field}" data-tab-index="${tabIndex}" data-style-mode="text" spellcheck="false" placeholder="Inherit" aria-label="${escapeHtml(
+              label
+            )} CSS value">
+            <button class="text-mini-button" type="button" data-action="tab-style-transparent" data-tab-style-field="${field}" data-tab-index="${tabIndex}" title="Set transparent">
+              <ha-icon icon="mdi:checkerboard"></ha-icon>
+              <span>Transparent</span>
+            </button>
+            <button class="mini-button" type="button" data-action="tab-style-reset" data-tab-style-field="${field}" data-tab-index="${tabIndex}" title="Inherit">
+              <ha-icon icon="mdi:restore"></ha-icon>
+            </button>
+          </div>
+        </div>
+      `
+    }
+
+    _renderTabSizeControl(tabIndex, field) {
+      const value = this._tabStyleValue(tabIndex, field)
+      const label = this._computeFormLabel({ name: field }) || field
+      return `
+        <div class="visual-control">
+          <label>${escapeHtml(label)}</label>
+          <div class="control-row stepper-row">
+            <button class="mini-button" type="button" data-action="tab-style-step" data-tab-style-field="${field}" data-tab-index="${tabIndex}" data-step="-1" title="Decrease">
+              <ha-icon icon="mdi:minus"></ha-icon>
+            </button>
+            <input class="style-value" type="text" value="${escapeHtml(value)}" data-tab-style-field="${field}" data-tab-index="${tabIndex}" data-style-mode="text" spellcheck="false" placeholder="Inherit" aria-label="${escapeHtml(
+              label
+            )} CSS value">
+            <button class="mini-button" type="button" data-action="tab-style-step" data-tab-style-field="${field}" data-tab-index="${tabIndex}" data-step="1" title="Increase">
+              <ha-icon icon="mdi:plus"></ha-icon>
+            </button>
+            <button class="mini-button" type="button" data-action="tab-style-reset" data-tab-style-field="${field}" data-tab-index="${tabIndex}" title="Inherit">
+              <ha-icon icon="mdi:restore"></ha-icon>
+            </button>
+          </div>
         </div>
       `
     }
@@ -2672,6 +3052,8 @@
         <div class="tab-body">
           <div class="section-title">Selected tab</div>
           ${this._haForm("tab", this._editingTabIndex)}
+          <div class="section-title">Tab style</div>
+          ${this._renderTabStyleControls(this._editingTabIndex)}
           <div class="toolbar">
             <ha-button appearance="outlined" type="button" data-action="make-default" data-tab-index="${
               this._editingTabIndex
@@ -2901,8 +3283,109 @@
         .join(" ")
     }
 
+    _styleValue(field) {
+      return asString(this._config?.styles?.[field] ?? DEFAULT_STYLES[field] ?? "", "")
+    }
+
+    _setStyleValue(field, value) {
+      if (!this._config || !(field in DEFAULT_STYLES)) return
+      this._config.styles[field] = asString(value, "")
+      this._emit(false)
+      this._syncStyleInputs(field)
+    }
+
+    _stepStyleValue(field, direction) {
+      if (!this._config || !(field in DEFAULT_STYLES)) return
+      const settings = STYLE_STEPPER_SETTINGS[field] || { step: 1, min: 0, unit: "px" }
+      const nextValue = stepCssValue(
+        this._styleValue(field),
+        DEFAULT_STYLES[field],
+        direction < 0 ? -1 : 1,
+        settings
+      )
+      this._setStyleValue(field, nextValue)
+    }
+
+    _syncStyleInputs(field) {
+      if (!this.shadowRoot) return
+      const value = this._styleValue(field)
+      const colorValue = cssColorToHex(value) || cssColorToHex(DEFAULT_STYLES[field]) || "#000000"
+      const transparent = value.trim().toLowerCase() === "transparent"
+      this.shadowRoot.querySelectorAll("[data-style-field]").forEach((input) => {
+        if (input.dataset.styleField !== field) return
+        if (input.tagName !== "INPUT") return
+        if (input.dataset.styleMode === "color") {
+          input.value = colorValue
+          input.closest(".color-swatch")?.classList.toggle("transparent", transparent)
+          return
+        }
+        if ("value" in input) input.value = value
+      })
+    }
+
+    _tabStyleValue(tabIndex, field) {
+      return asString(this._config?.tabs?.[tabIndex]?.styles?.[field] ?? TAB_STYLE_DEFAULTS[field] ?? "", "")
+    }
+
+    _setTabStyleValue(tabIndex, field, value) {
+      const tab = this._config?.tabs?.[tabIndex]
+      if (!tab || !(field in TAB_STYLE_DEFAULTS)) return
+      tab.styles = tab.styles || {}
+      const nextValue = asString(value, "")
+      if (nextValue) {
+        tab.styles[field] = nextValue
+      } else {
+        delete tab.styles[field]
+      }
+      this._emit(false)
+      this._syncTabStyleInputs(tabIndex, field)
+    }
+
+    _stepTabStyleValue(tabIndex, field, direction) {
+      const tab = this._config?.tabs?.[tabIndex]
+      if (!tab || !(field in TAB_STYLE_DEFAULTS)) return
+      const fallback = this._tabStyleValue(tabIndex, field) || this._styleValue(field) || DEFAULT_STYLES[field]
+      const settings = STYLE_STEPPER_SETTINGS[field] || { step: 1, min: 0, unit: "px" }
+      const nextValue = stepCssValue(
+        this._tabStyleValue(tabIndex, field),
+        fallback,
+        direction < 0 ? -1 : 1,
+        settings
+      )
+      this._setTabStyleValue(tabIndex, field, nextValue)
+    }
+
+    _syncTabStyleInputs(tabIndex, field) {
+      if (!this.shadowRoot) return
+      const value = this._tabStyleValue(tabIndex, field)
+      const fallback = field === "accent_color" ? this._styleValue("active_color") : this._styleValue(field)
+      const colorValue = cssColorToHex(value) || cssColorToHex(fallback) || "#000000"
+      const transparent = value.trim().toLowerCase() === "transparent"
+      this.shadowRoot.querySelectorAll("[data-tab-style-field]").forEach((input) => {
+        if (input.dataset.tabStyleField !== field) return
+        if (Number(input.dataset.tabIndex) !== tabIndex) return
+        if (input.tagName !== "INPUT") return
+        if (input.dataset.styleMode === "color") {
+          input.value = colorValue
+          input.closest(".color-swatch")?.classList.toggle("transparent", transparent)
+          return
+        }
+        if ("value" in input) input.value = value
+      })
+    }
+
     _onRootChange(event) {
       const target = event.target
+      const tabStyleField = target?.dataset?.tabStyleField
+      if (tabStyleField && this._config && !target.tagName?.startsWith("HA-")) {
+        this._setTabStyleValue(Number(target.dataset.tabIndex), tabStyleField, target.value)
+        return
+      }
+      const styleField = target?.dataset?.styleField
+      if (styleField && this._config && !target.tagName?.startsWith("HA-")) {
+        this._setStyleValue(styleField, target.value)
+        return
+      }
       const field = target?.dataset?.field
       if (!field || !this._config || target.tagName?.startsWith("HA-")) return
       if (field === "card.json") {
@@ -2930,6 +3413,45 @@
       if (action === "section") {
         this._section = actionTarget.dataset.section
         this._render()
+        return
+      }
+
+      if (action === "style-transparent") {
+        this._setStyleValue(actionTarget.dataset.styleField, "transparent")
+        return
+      }
+
+      if (action === "style-reset") {
+        const field = actionTarget.dataset.styleField
+        this._setStyleValue(field, DEFAULT_STYLES[field] ?? "")
+        return
+      }
+
+      if (action === "style-step") {
+        this._stepStyleValue(actionTarget.dataset.styleField, Number(actionTarget.dataset.step) || 1)
+        return
+      }
+
+      if (action === "tab-style-transparent") {
+        this._setTabStyleValue(
+          Number(actionTarget.dataset.tabIndex),
+          actionTarget.dataset.tabStyleField,
+          "transparent"
+        )
+        return
+      }
+
+      if (action === "tab-style-reset") {
+        this._setTabStyleValue(Number(actionTarget.dataset.tabIndex), actionTarget.dataset.tabStyleField, "")
+        return
+      }
+
+      if (action === "tab-style-step") {
+        this._stepTabStyleValue(
+          Number(actionTarget.dataset.tabIndex),
+          actionTarget.dataset.tabStyleField,
+          Number(actionTarget.dataset.step) || 1
+        )
         return
       }
 
@@ -3159,9 +3681,9 @@
         tab.attributes.hidden = asBool(value.hidden, false)
         tab.attributes.disabled = asBool(value.disabled, false)
         tab.styles = tab.styles || {}
-        tab.styles.accent_color = asString(value.accent_color, "")
-        tab.styles.panel_padding = asString(value.panel_padding, "")
-        tab.styles.panel_background = asString(value.panel_background, "")
+        if ("accent_color" in value) tab.styles.accent_color = asString(value.accent_color, "")
+        if ("panel_padding" in value) tab.styles.panel_padding = asString(value.panel_padding, "")
+        if ("panel_background" in value) tab.styles.panel_background = asString(value.panel_background, "")
         this._refreshEditorTabButtons()
         this._emit(false)
         return

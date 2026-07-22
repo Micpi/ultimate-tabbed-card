@@ -13,6 +13,7 @@ Ultimate Tabbed Card is a fast Lovelace container that lets you build tabbed das
 - Fully visual card configuration with Home Assistant native `ha-form` controls and selectors.
 - Native entity, icon and template pickers are used throughout the tabbed-card editor.
 - Child cards are added with the Home Assistant native card picker and edited with their own native visual editors when available.
+- Appearance tuning includes color pickers, transparent buttons, reset buttons and plus/minus steppers for CSS sizes.
 - The visual editor avoids full rebuilds, renders only the active editor section and loads child-card editors or the card picker only when opened.
 - Lazy rendering by default, optional idle/all-tab preload, keep-alive mode and an optional max cache size.
 - Multiple cards per tab with native visual add, duplicate, reorder and delete controls, including intentionally empty tabs while configuring.
@@ -44,8 +45,8 @@ type: module
 Add `Ultimate Tabbed Card` from the Home Assistant card picker, then use the visual editor sections:
 
 - General: default tab, cache strategy, tab memory, deep links, swipe and display toggles.
-- Appearance: tab position, alignment, visual preset, density, colors, spacing and radius.
-- Tabs: labels, icons, ids, tab badges, visibility conditions and child cards.
+- Appearance: tab position, alignment, visual preset, density, color pickers, transparent values, spacing and radius steppers.
+- Tabs: labels, icons, ids, per-tab style controls, tab badges, visibility conditions and child cards.
 - Advanced: read-only generated JSON for debugging or sharing.
 
 The normal workflow does not require YAML. A JSON fallback remains available per child card for custom cards that do not expose their own visual editor.
